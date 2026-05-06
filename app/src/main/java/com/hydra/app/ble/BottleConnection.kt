@@ -48,7 +48,9 @@ object BottleConfig {
     // We always use SEARCH_ALGO_TIMESTAMP — empirically it returns batches per request,
     // whereas INCREMENT mode trickles one entry per request and is ~10× slower.
     const val SIP_PAGE_SIZE = 100                 // entries per RequestGetCapTofLog page
-    const val SIP_PAGE_QUIET_MS = 400L            // end-of-page if no new TofLog notifications for this long
+    const val SIP_PAGE_QUIET_MS = 400L            // end-of-page once entries are flowing: this long without one
+    const val SIP_PAGE_FIRST_RESPONSE_MS = 2_500L // wait this long for the FIRST entry of a new page before declaring it empty
+                                                  // (older bottles take longer to seek deeper into the ring buffer)
 
     /**
      * The bottle's size in mL — used to look up the volume polynomial in [BottleMath].
@@ -561,7 +563,17 @@ class BottleConnection(
         )
         Log.d(TAG, "sync page=$currentPageNumber from=$nextFromTimestamp")
         sendCommand(BottleProtocol.Requests.GET_TOF_LOG, payload)
-        armPageQuietTimer()
+        // Use the longer "first response" timeout — the in-page quiet timer takes over
+        // once any entry arrives (see armPageQuietTimer in the response handler).
+        armFirstResponseTimer()
+    }
+
+    private fun armFirstResponseTimer() {
+        pageQuietJob?.cancel()
+        pageQuietJob = scope.launch {
+            delay(BottleConfig.SIP_PAGE_FIRST_RESPONSE_MS)
+            onPageComplete()
+        }
     }
 
     private fun armPageQuietTimer() {
