@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Hydra themed-icon (Android 13+) silhouette. Only the alpha channel matters —
+  the launcher colours the paths with its own theme accent. Same ring + drop
+  silhouette as the full-colour foreground, just flat.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <path
+        android:pathData="M 54,54 m -30,0 a 30,30 0 1,0 60,0 a 30,30 0 1,0 -60,0"
+        android:strokeColor="#66FFFFFF"
+        android:strokeWidth="2.5"
+        android:fillColor="#00000000" />
+
+    <path
+        android:pathData="M 54,24 A 30,30 0 1 1 24.531,59.619"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="5.5"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000" />
+
+    <path
+        android:pathData="M 54,33.984 Q 51.161,43.244 45.694,52.504 A 10.14,10.14 0 1 0 62.306,52.504 Q 56.839,43.244 54,33.984 Z"
+        android:fillColor="#FFFFFFFF" />
+</vector>

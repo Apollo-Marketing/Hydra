@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Hydra adaptive-icon foreground. Hairline track + cyan→violet 72%-progress arc
+  with a soft glow underlay, centered on a multi-stop water drop with a radial
+  highlight near the top-left.
+
+  Coords: 108×108 viewport. Ring centered at (54, 54) r=30 stroke=5.5; outer extent
+  32.75 from center sits within the strict 33-dp safe-zone radius (66×66 inside the
+  108×108 canvas) so it shows in full on every launcher mask shape. Arc starts at
+  12 o'clock, sweeps 259.2° clockwise. Drop body radius 10.14 with pointed tip at
+  y=33.984; spans (33.98..68.46) vertically — also safe-zone friendly.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <path
+        android:pathData="M 54,54 m -30,0 a 30,30 0 1,0 60,0 a 30,30 0 1,0 -60,0"
+        android:strokeColor="#2E8CB4FF"
+        android:strokeWidth="5.5"
+        android:fillColor="#00000000" />
+
+    <path
+        android:pathData="M 54,24 A 30,30 0 1 1 24.531,59.619"
+        android:strokeWidth="8.5"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000">
+        <aapt:attr name="android:strokeColor">
+            <gradient
+                android:type="linear"
+                android:startX="0"
+                android:startY="0"
+                android:endX="108"
+                android:endY="108">
+                <item android:offset="0.0" android:color="#995CD6FF" />
+                <item android:offset="0.35" android:color="#997AD3FF" />
+                <item android:offset="0.65" android:color="#99A8A6FF" />
+                <item android:offset="1.0" android:color="#999B8CFF" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <path
+        android:pathData="M 54,24 A 30,30 0 1 1 24.531,59.619"
+        android:strokeWidth="5.5"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000">
+        <aapt:attr name="android:strokeColor">
+            <gradient
+                android:type="linear"
+                android:startX="0"
+                android:startY="0"
+                android:endX="108"
+                android:endY="108">
+                <item android:offset="0.0" android:color="#FF5CD6FF" />
+                <item android:offset="0.35" android:color="#FF7AD3FF" />
+                <item android:offset="0.65" android:color="#FFA8A6FF" />
+                <item android:offset="1.0" android:color="#FF9B8CFF" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <path
+        android:pathData="M 54,33.984 Q 51.161,43.244 45.694,52.504 A 10.14,10.14 0 1 0 62.306,52.504 Q 56.839,43.244 54,33.984 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:type="linear"
+                android:startX="54"
+                android:startY="34"
+                android:endX="54"
+                android:endY="68.5">
+                <item android:offset="0.0" android:color="#FFE8FAFF" />
+                <item android:offset="0.35" android:color="#FF9AE6FF" />
+                <item android:offset="0.75" android:color="#FF5CB7FF" />
+                <item android:offset="1.0" android:color="#FF7E6DFF" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <path
+        android:pathData="M 54,33.984 Q 51.161,43.244 45.694,52.504 A 10.14,10.14 0 1 0 62.306,52.504 Q 56.839,43.244 54,33.984 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:type="radial"
+                android:centerX="50"
+                android:centerY="40"
+                android:gradientRadius="11">
+                <item android:offset="0.0" android:color="#D9FFFFFF" />
+                <item android:offset="0.6" android:color="#1AFFFFFF" />
+                <item android:offset="1.0" android:color="#00FFFFFF" />
+            </gradient>
+        </aapt:attr>
+    </path>
+</vector>
