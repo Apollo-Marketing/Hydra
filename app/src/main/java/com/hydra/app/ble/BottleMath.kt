@@ -119,6 +119,52 @@ object BottleMath {
         return totalDrunk
     }
 
+    data class DrinkRecord(
+        val timestampSec: Long,
+        val startMs: Long,
+        val endMs: Long,
+        val volumeMl: Double,
+    )
+
+    /**
+     * Per-sip view of [entries] — every drinking event becomes one record. Same math as
+     * [intakeOnDateMl] but emitting each contributing event rather than collapsing to a daily
+     * sum. `timestampSec` is the entry's own timestamp (unique per row), suitable as a stable
+     * external ID for the Health Connect bridge.
+     *
+     * BLE-synced rows contribute when the polynomial delta from the previous BLE row is
+     * positive (water level dropped — user drank); the record's interval spans previous→current.
+     * Manual rows contribute as instantaneous records (start == end == entry time) carrying
+     * `manualVolumeMl` verbatim. Pairs with no polynomial calibration for the bottle size are
+     * silently skipped — same fall-through as the other aggregators.
+     */
+    fun perSipDrinks(entries: List<SipEntity>, bottleSizeMl: Int): List<DrinkRecord> {
+        val sortedAsc = entries.sortedBy { it.timestampSec }
+        val bleOnly = sortedAsc.filter { it.manualVolumeMl == null }
+        val out = mutableListOf<DrinkRecord>()
+        for (i in 1 until bleOnly.size) {
+            val curr = bleOnly[i]
+            val prev = bleOnly[i - 1]
+            val prevVol = volumeMl(prev.distanceMm, bottleSizeMl) ?: continue
+            val currVol = volumeMl(curr.distanceMm, bottleSizeMl) ?: continue
+            val delta = prevVol - currVol
+            if (delta > 0) {
+                out += DrinkRecord(
+                    timestampSec = curr.timestampSec,
+                    startMs = prev.timestampSec * 1000L,
+                    endMs = curr.timestampSec * 1000L,
+                    volumeMl = delta,
+                )
+            }
+        }
+        for (entry in sortedAsc) {
+            val manual = entry.manualVolumeMl ?: continue
+            val ms = entry.timestampSec * 1000L
+            out += DrinkRecord(entry.timestampSec, ms, ms, manual.toDouble())
+        }
+        return out.sortedBy { it.timestampSec }
+    }
+
     /**
      * Most recent BLE-synced reading's volume in mL, or null if no BLE entries / no
      * polynomial. Manual sips are explicitly excluded — they don't carry a real distance

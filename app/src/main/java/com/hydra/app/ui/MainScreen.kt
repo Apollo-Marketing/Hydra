@@ -19,6 +19,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import com.hydra.app.ble.BottleConfig
 import com.hydra.app.ble.BottleConnection
 import com.hydra.app.ble.BottleEvent
 import com.hydra.app.ble.ConnectionState
@@ -26,6 +27,7 @@ import com.hydra.app.data.AppPreferencesRepository
 import com.hydra.app.data.HydraDatabase
 import com.hydra.app.data.SavedBottlesRepository
 import com.hydra.app.data.SipRepository
+import com.hydra.app.health.HealthConnectController
 import com.hydra.app.ui.components.AuroraGlow
 import com.hydra.app.ui.components.GlassNavItem
 import com.hydra.app.ui.components.GlassNavigationBar
@@ -38,6 +40,7 @@ import com.hydra.app.ui.screens.HydrationScreen
 import com.hydra.app.ui.screens.SettingsScreen
 import com.hydra.app.update.UpdateController
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.combine
 
 private const val TAB_HYDRATION = 0
 private const val TAB_BOTTLE = 1
@@ -54,6 +57,7 @@ fun MainScreen() {
     val prefs = remember(context) { AppPreferencesRepository.get(context) }
     val connection = remember(context) { BottleConnection(context, sipRepo) }
     val updateController = remember(context) { UpdateController.get(context) }
+    val healthConnect = remember(context) { HealthConnectController.get(context) }
 
     val savedBottles by savedRepo.observeAll().collectAsState(initial = emptyList())
     val firstSavedName = savedBottles.firstOrNull()?.name
@@ -81,6 +85,19 @@ fun MainScreen() {
                 prefs.setLastSync(ev.timestamp)
             }
         }
+    }
+
+    LaunchedEffect(healthConnect) { healthConnect.refreshAvailabilityAndPermission() }
+
+    // Push new sips into Health Connect whenever the local DB changes — and re-run after the
+    // user toggles HC on (status emits) so the existing history backfills without waiting
+    // for the next bottle sync. Controller short-circuits internally when disabled / not
+    // permitted, so the gate logic doesn't have to live here too.
+    LaunchedEffect(connection, healthConnect) {
+        combine(connection.sipLog, healthConnect.status) { entries, _ -> entries }
+            .collect { entries ->
+                healthConnect.onSipsChanged(entries, BottleConfig.BOTTLE_SIZE_ML)
+            }
     }
 
     DisposableEffect(connection) {

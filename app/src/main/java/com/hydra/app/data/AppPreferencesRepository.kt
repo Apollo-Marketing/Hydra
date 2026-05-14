@@ -30,6 +30,9 @@ class AppPreferencesRepository private constructor(context: Context) {
     val showStreak: Flow<Boolean> = store.data.map { it[KEY_SHOW_STREAK] ?: true }
     val lastUpdateCheckMs: Flow<Long> = store.data.map { it[KEY_LAST_UPDATE_CHECK_MS] ?: 0L }
     val autoUpdateEnabled: Flow<Boolean> = store.data.map { it[KEY_AUTO_UPDATE_ENABLED] ?: true }
+    val healthConnectEnabled: Flow<Boolean> = store.data.map { it[KEY_HC_ENABLED] ?: false }
+    /** Largest sip `timestampSec` already pushed to Health Connect; the sync watermark. */
+    val healthConnectLastSyncSec: Flow<Long> = store.data.map { it[KEY_HC_LAST_SYNC_SEC] ?: 0L }
 
     suspend fun setDailyGoal(mL: Int) {
         store.edit { it[KEY_DAILY_GOAL_ML] = mL.coerceAtLeast(0) }
@@ -55,6 +58,14 @@ class AppPreferencesRepository private constructor(context: Context) {
         store.edit { it[KEY_AUTO_UPDATE_ENABLED] = value }
     }
 
+    suspend fun setHealthConnectEnabled(value: Boolean) {
+        store.edit { it[KEY_HC_ENABLED] = value }
+    }
+
+    suspend fun setHealthConnectLastSyncSec(value: Long) {
+        store.edit { it[KEY_HC_LAST_SYNC_SEC] = value }
+    }
+
     enum class ThemeMode { System, Dark, Light }
 
     companion object {
@@ -66,6 +77,8 @@ class AppPreferencesRepository private constructor(context: Context) {
         private val KEY_SHOW_STREAK: Preferences.Key<Boolean> = booleanPreferencesKey("show_streak")
         private val KEY_LAST_UPDATE_CHECK_MS: Preferences.Key<Long> = longPreferencesKey("last_update_check_ms")
         private val KEY_AUTO_UPDATE_ENABLED: Preferences.Key<Boolean> = booleanPreferencesKey("auto_update_enabled")
+        private val KEY_HC_ENABLED: Preferences.Key<Boolean> = booleanPreferencesKey("hc_enabled")
+        private val KEY_HC_LAST_SYNC_SEC: Preferences.Key<Long> = longPreferencesKey("hc_last_sync_sec")
 
         @Volatile
         private var instance: AppPreferencesRepository? = null
