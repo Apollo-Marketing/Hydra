@@ -1,6 +1,10 @@
 package com.hydra.app.ui.screens
 
 import android.Manifest
+import android.content.ActivityNotFoundException
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
@@ -63,7 +67,10 @@ import com.hydra.app.data.AppPreferencesRepository.ThemeMode
 import com.hydra.app.data.HydraDatabase
 import com.hydra.app.data.SavedBottleEntity
 import com.hydra.app.data.SavedBottlesRepository
+import com.hydra.app.health.HealthConnectAvailability
+import com.hydra.app.health.HealthConnectController
 import com.hydra.app.ui.components.GlassCard
+import com.hydra.app.ui.components.HealthConnectPrivacyDialog
 import com.hydra.app.ui.components.HydraIcon
 import com.hydra.app.ui.components.HydraIconName
 import com.hydra.app.ui.components.rememberRelativeTime
@@ -94,6 +101,7 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
     val prefs = remember(context) { AppPreferencesRepository.get(context) }
     val scanner = remember(context) { BottleScanner(context) }
     val updateController = remember(context) { UpdateController.get(context) }
+    val healthConnect = remember(context) { HealthConnectController.get(context) }
 
     val savedBottles by savedRepo.observeAll().collectAsState(initial = emptyList())
     val discovered by scanner.discovered.collectAsState()
@@ -103,10 +111,24 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
     val showStreak by prefs.showStreak.collectAsState(initial = true)
     val autoUpdateEnabled by prefs.autoUpdateEnabled.collectAsState(initial = true)
     val lastUpdateCheckMs by prefs.lastUpdateCheckMs.collectAsState(initial = 0L)
+    val hcStatus by healthConnect.status.collectAsState()
 
     var pendingRemove: SavedBottleEntity? by remember { mutableStateOf(null) }
     var scanSheetOpen by rememberSaveable { mutableStateOf(false) }
     var themePickerOpen by rememberSaveable { mutableStateOf(false) }
+    var hcPrivacyOpen by rememberSaveable { mutableStateOf(false) }
+
+    // Health Connect's contract is keyed on the controller (a singleton), not the activity,
+    // so re-creating it across recompositions doesn't leak the launcher registration.
+    val hcPermissionContract = remember(healthConnect) { healthConnect.permissionContract() }
+    val hcPermissionLauncher = rememberLauncherForActivityResult(hcPermissionContract) { granted ->
+        scope.launch {
+            healthConnect.refreshAvailabilityAndPermission()
+            if (granted.containsAll(healthConnect.requiredPermissions)) {
+                healthConnect.setEnabled(true)
+            }
+        }
+    }
 
     DisposableEffect(scanner) {
         onDispose { scanner.stop() }
@@ -190,6 +212,56 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
             )
         }
 
+        val hcRelative = rememberRelativeTime(hcStatus.lastSyncSec * 1000L, neverLabel = "not yet")
+        val hcSubtitle = when (hcStatus.availability) {
+            HealthConnectAvailability.NotInstalled -> "Install Health Connect"
+            HealthConnectAvailability.UpdateRequired -> "Update Health Connect"
+            HealthConnectAvailability.Unsupported -> "Not supported on this device"
+            HealthConnectAvailability.Available -> when {
+                hcStatus.enabled && hcStatus.hasPermission && hcStatus.lastSyncSec > 0L ->
+                    "On · last synced $hcRelative"
+                hcStatus.enabled && hcStatus.hasPermission -> "On"
+                hcStatus.enabled -> "Permission needed"
+                else -> "Off"
+            }
+        }
+        SettingsGroup(title = "Integrations") {
+            SettingsRow(
+                label = "Sync to Health Connect",
+                value = hcSubtitle,
+                end = if (hcStatus.enabled) RowEnd.ToggleOn else RowEnd.ToggleOff,
+                onClick = {
+                    when (hcStatus.availability) {
+                        HealthConnectAvailability.Available -> {
+                            if (hcStatus.enabled) {
+                                scope.launch { healthConnect.setEnabled(false) }
+                            } else {
+                                hcPermissionLauncher.launch(healthConnect.requiredPermissions)
+                            }
+                        }
+                        HealthConnectAvailability.NotInstalled,
+                        HealthConnectAvailability.UpdateRequired -> {
+                            openHealthConnectInStore(context)
+                        }
+                        HealthConnectAvailability.Unsupported -> Unit
+                    }
+                },
+            )
+            if (hcStatus.availability == HealthConnectAvailability.Available) {
+                SettingsRow(
+                    label = "View in Health Connect",
+                    end = RowEnd.Arrow,
+                    onClick = { openHealthConnectApp(context) },
+                )
+            }
+            SettingsRow(
+                label = "Privacy",
+                end = RowEnd.Arrow,
+                last = true,
+                onClick = { hcPrivacyOpen = true },
+            )
+        }
+
         val lastCheckRelative = rememberRelativeTime(lastUpdateCheckMs, neverLabel = "Never checked")
         val checkLabel = if (lastUpdateCheckMs == 0L) {
             lastCheckRelative
@@ -268,6 +340,28 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
                 TextButton(onClick = { pendingRemove = null }) { Text("Cancel", color = colors.inkSoft) }
             },
         )
+    }
+
+    HealthConnectPrivacyDialog(open = hcPrivacyOpen, onDismiss = { hcPrivacyOpen = false })
+}
+
+private fun openHealthConnectInStore(context: Context) {
+    val intent = Intent(
+        Intent.ACTION_VIEW,
+        Uri.parse("market://details?id=com.google.android.apps.healthdata"),
+    ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    runCatching { context.startActivity(intent) }
+}
+
+private fun openHealthConnectApp(context: Context) {
+    // Health Connect 1.0+ registers this action; on older Android variants the manage screen
+    // may not exist, so fall back to the Play Store listing.
+    val open = Intent("androidx.health.ACTION_HEALTH_CONNECT_SETTINGS")
+        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    try {
+        context.startActivity(open)
+    } catch (_: ActivityNotFoundException) {
+        openHealthConnectInStore(context)
     }
 }
 
