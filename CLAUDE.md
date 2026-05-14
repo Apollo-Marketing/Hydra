@@ -26,7 +26,7 @@ Gradle and adb aren't on PATH — use the bundled JDK and Android SDK paths:
 
 ```
 app/src/main/java/com/hydra/app/
-├── MainActivity.kt         # entry — applies HydraTheme, hosts MainScreen
+├── MainActivity.kt         # entry — applies HydraTheme, hosts MainScreen; routes the Health Connect rationale intent to the privacy dialog
 ├── ble/                    # BLE + protocol layer
 │   ├── BottleConnection.kt # GATT, sync orchestration, notifications
 │   ├── BottleScanner.kt    # scan-only (used by Settings pairing)
@@ -37,19 +37,26 @@ app/src/main/java/com/hydra/app/
 │   ├── HydraDatabase.kt    # @Database — sip_log + saved_bottles tables (v3 — adds sip_log.manualVolumeMl)
 │   ├── SipEntity/Dao/Repository  # SipEntity.manualVolumeMl distinguishes BLE vs manually-logged sips
 │   ├── SavedBottleEntity/Dao/Repository
-│   └── AppPreferencesRepository.kt  # DataStore — daily goal, last-sync ms, theme mode, show-streak, auto-update flag, last-update-check ms
+│   └── AppPreferencesRepository.kt  # DataStore — daily goal, last-sync ms, theme mode, show-streak, auto-update flag, last-update-check ms, hc-enabled, hc-last-sync-sec
 ├── update/                 # GitHub Releases auto-updater
 │   ├── UpdateChecker.kt    # GitHub API call + tag → versionCode parse
 │   ├── UpdateInstaller.kt  # DownloadManager + FileProvider hand-off to system installer
 │   ├── UpdateController.kt # state machine, 24h auto-check rate-limit, manual-vs-auto routing
 │   └── UpdateState.kt      # sealed Idle/Checking/UpToDate/Available/Downloading/ReadyToInstall/PermissionRequired/Error
+├── health/                 # Health Connect bridge — write-only sync of sip data
+│   ├── HealthConnectAvailability.kt   # sealed Available/NotInstalled/UpdateRequired/Unsupported
+│   ├── HealthConnectGateway.kt        # SOLE point of contact with androidx.health.connect.client.*
+│   ├── HealthConnectStatus.kt         # snapshot data class read by Settings UI
+│   └── HealthConnectController.kt     # singleton: status StateFlow + onSipsChanged sync + watermark
 └── ui/
-    ├── MainScreen.kt       # tabbed root: Today / Bottle / History / Settings; hosts UpdateDialog
+    ├── MainScreen.kt       # tabbed root: Today / Bottle / History / Settings; hosts UpdateDialog;
+    │                       # wires HealthConnectController to sipLog → onSipsChanged via combine()
     ├── components/         # GlassCard, GlassNavigationBar, GradientBackground, AuroraGlow,
     │                       # HydraIcon/Logo, HydrationRing, LiquidBottle, HourlyBarChart,
     │                       # WeeklyBarChart, HydrationHeatmap, ConnectionBadge, RelativeTime,
     │                       # ManualSipDialog (volume + time picker for hand-logged sips),
-    │                       # UpdateDialog (Available/Downloading/ReadyToInstall/PermissionRequired/UpToDate/Error)
+    │                       # UpdateDialog (Available/Downloading/ReadyToInstall/PermissionRequired/UpToDate/Error),
+    │                       # HealthConnectPrivacyDialog (shared by Settings row + rationale intent)
     ├── screens/            # HydrationScreen, BottleScreen, HistoryScreen, SettingsScreen
     └── theme/              # HydraColors token bag (Dark/Light) + Material3 theme
 ```

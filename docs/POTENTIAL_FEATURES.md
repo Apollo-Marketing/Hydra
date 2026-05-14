@@ -25,6 +25,7 @@ These are in code today — listed so we don't duplicate.
 - Per-day sip log with prev/next date arrows
 - "Bottle: X mL" + "Intake: Y mL · N sips" header
 - Clear sip log button with confirmation
+- Health Connect write-only sync (opt-in; backfills history on first enable; deterministic clientRecordIds for upsert/delete; rationale-intent privacy dialog)
 
 ---
 
