@@ -34,15 +34,19 @@ app/src/main/java/com/hydra/app/
 │   ├── BottleEvent.kt      # typed events for the (unused) activity feed
 │   └── BottleMath.kt       # polynomial volume calc + intake aggregators
 ├── data/                   # Persistence
-│   ├── HydraDatabase.kt    # @Database — sip_log + saved_bottles tables (v3 — adds sip_log.manualVolumeMl)
+│   ├── HydraDatabase.kt    # @Database — sip_log + saved_bottles + filters + filter_pauses (v4; 3→4 is a real additive migration)
 │   ├── SipEntity/Dao/Repository  # SipEntity.manualVolumeMl distinguishes BLE vs manually-logged sips
 │   ├── SavedBottleEntity/Dao/Repository
+│   ├── FilterEntity/Dao/Repository  # active filter + temporary-removal periods (app-side only; the bottle has no filter concept)
 │   └── AppPreferencesRepository.kt  # DataStore — daily goal, last-sync ms, theme mode, show-streak, auto-update flag, last-update-check ms, hc-enabled, hc-last-sync-sec
 ├── update/                 # GitHub Releases auto-updater
 │   ├── UpdateChecker.kt    # GitHub API call + tag → versionCode parse
 │   ├── UpdateInstaller.kt  # DownloadManager + FileProvider hand-off to system installer
 │   ├── UpdateController.kt # state machine, 24h auto-check rate-limit, manual-vs-auto routing
 │   └── UpdateState.kt      # sealed Idle/Checking/UpToDate/Available/Downloading/ReadyToInstall/PermissionRequired/Error
+├── filter/                 # Filter tracking
+│   ├── FilterMath.kt       # types/capacities + health = lower of volume gauge and 60-day age gauge (mirrors official app)
+│   └── FilterReminder.kt   # replacement notification + age-milestone alarms + receiver
 ├── health/                 # Health Connect bridge — write-only sync of sip data
 │   ├── HealthConnectAvailability.kt   # sealed Available/NotInstalled/UpdateRequired/Unsupported
 │   ├── HealthConnectGateway.kt        # SOLE point of contact with androidx.health.connect.client.*
@@ -57,7 +61,7 @@ app/src/main/java/com/hydra/app/
     │                       # ManualSipDialog (volume + time picker for hand-logged sips),
     │                       # UpdateDialog (Available/Downloading/ReadyToInstall/PermissionRequired/UpToDate/Error),
     │                       # HealthConnectPrivacyDialog (shared by Settings row + rationale intent)
-    ├── screens/            # HydrationScreen, BottleScreen, HistoryScreen, SettingsScreen
+    ├── screens/            # HydrationScreen, BottleScreen (hosts FilterScreen as a detail view), HistoryScreen, SettingsScreen
     └── theme/              # HydraColors token bag (Dark/Light) + Material3 theme
 ```
 

@@ -124,6 +124,8 @@ object BottleMath {
         val startMs: Long,
         val endMs: Long,
         val volumeMl: Double,
+        /** True for hand-logged sips — water that did not necessarily pass through the bottle. */
+        val manual: Boolean = false,
     )
 
     /**
@@ -160,7 +162,7 @@ object BottleMath {
         for (entry in sortedAsc) {
             val manual = entry.manualVolumeMl ?: continue
             val ms = entry.timestampSec * 1000L
-            out += DrinkRecord(entry.timestampSec, ms, ms, manual.toDouble())
+            out += DrinkRecord(entry.timestampSec, ms, ms, manual.toDouble(), manual = true)
         }
         return out.sortedBy { it.timestampSec }
     }

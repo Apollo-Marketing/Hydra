@@ -34,6 +34,18 @@ class AppPreferencesRepository private constructor(context: Context) {
     /** Largest sip `timestampSec` already pushed to Health Connect; the sync watermark. */
     val healthConnectLastSyncSec: Flow<Long> = store.data.map { it[KEY_HC_LAST_SYNC_SEC] ?: 0L }
 
+    /** Whether to post a notification when the filter reaches "replace soon" / "replace now". */
+    val filterReminderEnabled: Flow<Boolean> = store.data.map { it[KEY_FILTER_REMINDER] ?: false }
+    /** "<filterId>:<status>" of the last filter reminder posted, so each stage notifies once. */
+    val filterLastNotified: Flow<String> = store.data.map { it[KEY_FILTER_LAST_NOTIFIED] ?: "" }
+
+    suspend fun setFilterReminderEnabled(value: Boolean) {
+        store.edit { it[KEY_FILTER_REMINDER] = value }
+    }
+    suspend fun setFilterLastNotified(value: String) {
+        store.edit { it[KEY_FILTER_LAST_NOTIFIED] = value }
+    }
+
     suspend fun setDailyGoal(mL: Int) {
         store.edit { it[KEY_DAILY_GOAL_ML] = mL.coerceAtLeast(0) }
     }
@@ -79,6 +91,9 @@ class AppPreferencesRepository private constructor(context: Context) {
         private val KEY_AUTO_UPDATE_ENABLED: Preferences.Key<Boolean> = booleanPreferencesKey("auto_update_enabled")
         private val KEY_HC_ENABLED: Preferences.Key<Boolean> = booleanPreferencesKey("hc_enabled")
         private val KEY_HC_LAST_SYNC_SEC: Preferences.Key<Long> = longPreferencesKey("hc_last_sync_sec")
+
+        private val KEY_FILTER_REMINDER: Preferences.Key<Boolean> = booleanPreferencesKey("filter_reminder_enabled")
+        private val KEY_FILTER_LAST_NOTIFIED: Preferences.Key<String> = stringPreferencesKey("filter_last_notified")
 
         @Volatile
         private var instance: AppPreferencesRepository? = null

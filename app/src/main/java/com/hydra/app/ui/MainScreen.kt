@@ -24,7 +24,9 @@ import com.hydra.app.ble.BottleConnection
 import com.hydra.app.ble.BottleEvent
 import com.hydra.app.ble.ConnectionState
 import com.hydra.app.data.AppPreferencesRepository
+import com.hydra.app.data.FilterRepository
 import com.hydra.app.data.HydraDatabase
+import com.hydra.app.filter.FilterReminder
 import com.hydra.app.data.SavedBottlesRepository
 import com.hydra.app.data.SipRepository
 import com.hydra.app.health.HealthConnectController
@@ -40,6 +42,7 @@ import com.hydra.app.ui.screens.HydrationScreen
 import com.hydra.app.ui.screens.SettingsScreen
 import com.hydra.app.update.UpdateController
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 
 private const val TAB_HYDRATION = 0
@@ -55,6 +58,7 @@ fun MainScreen() {
     val sipRepo = remember(context) { SipRepository(HydraDatabase.get(context).sipDao()) }
     val savedRepo = remember(context) { SavedBottlesRepository(HydraDatabase.get(context).savedBottleDao()) }
     val prefs = remember(context) { AppPreferencesRepository.get(context) }
+    val filterRepo = remember(context) { FilterRepository(HydraDatabase.get(context)) }
     val connection = remember(context) { BottleConnection(context, sipRepo) }
     val updateController = remember(context) { UpdateController.get(context) }
     val healthConnect = remember(context) { HealthConnectController.get(context) }
@@ -97,6 +101,16 @@ fun MainScreen() {
         combine(connection.sipLog, healthConnect.status) { entries, _ -> entries }
             .collect { entries ->
                 healthConnect.onSipsChanged(entries, BottleConfig.BOTTLE_SIZE_ML)
+            }
+    }
+
+    // Filter replacement reminder: re-evaluate whenever the filter, the sip history, or the
+    // reminder switch changes, and keep the age-milestone alarms armed for the active filter.
+    LaunchedEffect(connection, filterRepo) {
+        combine(filterRepo.observeActive(), connection.sipLog, prefs.filterReminderEnabled) { _, _, _ -> }
+            .collectLatest {
+                FilterReminder.schedule(context)
+                FilterReminder.check(context)
             }
     }
 

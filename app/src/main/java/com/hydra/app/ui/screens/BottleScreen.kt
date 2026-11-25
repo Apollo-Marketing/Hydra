@@ -26,6 +26,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -41,7 +42,11 @@ import com.hydra.app.ble.BottleConnection
 import com.hydra.app.ble.BottleEvent
 import com.hydra.app.ble.ConnectionState
 import com.hydra.app.ble.SyncState
+import com.hydra.app.data.ActiveFilter
 import com.hydra.app.data.AppPreferencesRepository
+import com.hydra.app.data.FilterRepository
+import com.hydra.app.filter.FilterHealth
+import com.hydra.app.filter.FilterType
 import com.hydra.app.data.HydraDatabase
 import com.hydra.app.data.SipRepository
 import com.hydra.app.ui.components.GlassCard
@@ -60,12 +65,22 @@ import kotlin.math.roundToInt
 
 @Composable
 fun BottleScreen(connection: BottleConnection, modifier: Modifier = Modifier) {
+    // The filter screen is a full-tab detail view layered over the Bottle tab.
+    var showFilter by rememberSaveable { mutableStateOf(false) }
+    if (showFilter) {
+        FilterScreen(onBack = { showFilter = false }, modifier = modifier)
+        return
+    }
+
     val colors = LocalHydraColors.current
     val context = LocalContext.current
     val prefs = remember(context) { AppPreferencesRepository.get(context) }
     val sipRepo = remember(context) { SipRepository(HydraDatabase.get(context).sipDao()) }
+    val filterRepo = remember(context) { FilterRepository(HydraDatabase.get(context)) }
 
     val sips by sipRepo.observeAll().collectAsState(initial = emptyList())
+    val activeFilter by remember(filterRepo) { filterRepo.observeActive() }.collectAsState(initial = null)
+    val filterHealth = rememberFilterHealth(activeFilter)
     val lastSyncMs by prefs.lastSyncMs.collectAsState(initial = 0L)
     val connState by connection.state.collectAsState()
     val syncState by connection.syncState.collectAsState()
@@ -171,6 +186,12 @@ fun BottleScreen(connection: BottleConnection, modifier: Modifier = Modifier) {
             }
         }
 
+        FilterSummaryCard(
+            active = activeFilter,
+            health = filterHealth,
+            onClick = { showFilter = true },
+        )
+
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -236,6 +257,50 @@ private data class DeviceInfo(
     val firmware: String = "",
     val hardware: String = "",
 )
+
+@Composable
+private fun FilterSummaryCard(active: ActiveFilter?, health: FilterHealth?, onClick: () -> Unit) {
+    val colors = LocalHydraColors.current
+    GlassCard(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp),
+        contentPadding = 14.dp,
+        onClick = onClick,
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text("Filter", color = colors.ink, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Medium)
+                if (active == null || health == null) {
+                    Text("Not tracked. Tap to add your filter.", color = colors.inkSoft, style = MaterialTheme.typography.bodySmall)
+                } else {
+                    val type = FilterType.fromKey(active.filter.type).label
+                    val state = if (active.isPaused) "Temporarily removed" else health.status.shortLabel()
+                    Text(
+                        "$type · $state",
+                        color = if (active.isPaused) colors.inkSoft else health.status.tint(),
+                        style = MaterialTheme.typography.bodySmall,
+                        fontWeight = FontWeight.Medium,
+                    )
+                }
+            }
+            if (active != null && health != null) {
+                Row(verticalAlignment = Alignment.Bottom) {
+                    Text("${health.percent}", color = colors.ink, fontWeight = FontWeight.SemiBold, fontSize = 22.sp)
+                    Text(
+                        " %",
+                        color = colors.inkSoft,
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(bottom = 4.dp),
+                    )
+                }
+            }
+            HydraIcon(name = HydraIconName.Arrow, size = 14.dp, color = colors.inkDim)
+        }
+    }
+}
 
 @Composable
 private fun RefillChip() {

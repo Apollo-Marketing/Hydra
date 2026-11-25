@@ -10,6 +10,7 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <uses-permission android:name="android.permission.health.WRITE_HYDRATION" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <uses-feature
         android:name="android.hardware.bluetooth_le"
@@ -53,6 +54,11 @@
                 <category android:name="android.intent.category.HEALTH_PERMISSIONS" />
             </intent-filter>
         </activity>
+
+        <!-- Wakes at the filter's age milestones to post the replacement reminder. -->
+        <receiver
+            android:name=".filter.FilterReminderReceiver"
+            android:exported="false" />
 
         <provider
             android:name="androidx.core.content.FileProvider"
