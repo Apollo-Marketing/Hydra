@@ -16,7 +16,8 @@ A reverse-engineered Android app for the Larq PureVis 2 smart water bottle. Buil
 Gradle and adb aren't on PATH — use the bundled JDK and Android SDK paths:
 
 - **Build:** `JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home" ./gradlew assembleDebug`
-- **Install on phone:** `JAVA_HOME=...JDK ./gradlew installDebug` (phone must be plugged in with USB debugging)
+- **Install on phone:** `JAVA_HOME=...JDK ./gradlew installDebug` (phone must be plugged in with USB debugging). Debug builds install as a separate app, **Hydra Dev** (`com.hydra.app.dev`), and never touch the production install. Only one app can hold the bottle's BLE connection — `adb shell am force-stop com.hydra.app` before testing the dev app.
+- **Unit tests:** `JAVA_HOME=...JDK ./gradlew testDebugUnitTest`
 - **Logs:** `~/Library/Android/sdk/platform-tools/adb logcat -d -s HydraBle:V HydraScan:V`
 - **Pull APK from phone (for re-decompile):** `~/Library/Android/sdk/platform-tools/adb shell pm path com.larq.live` then `adb pull <path>`
 - **Clear sip log buffer:** Settings tab → Remove bottle. (The bottle's own ring buffer keeps re-syncing, so wiping locally only is temporary.)
@@ -28,11 +29,12 @@ Gradle and adb aren't on PATH — use the bundled JDK and Android SDK paths:
 app/src/main/java/com/hydra/app/
 ├── MainActivity.kt         # entry — applies HydraTheme, hosts MainScreen; routes the Health Connect rationale intent to the privacy dialog
 ├── ble/                    # BLE + protocol layer
-│   ├── BottleConnection.kt # GATT, sync orchestration, notifications
+│   ├── BottleConnection.kt # GATT, sync orchestration, notifications; StateFlows for cap UI state, live level,
+│   │                       # last-cleaned, quiet hours, battery + device info; clean / measure / quiet-hours commands
 │   ├── BottleScanner.kt    # scan-only (used by Settings pairing)
-│   ├── BottleProtocol.kt   # protobuf wire format + frame envelope + builders + parsers
+│   ├── BottleProtocol.kt   # protobuf wire format + frame envelope + builders + parsers; BottleClock (local ↔ bottle UTC times)
 │   ├── BottleEvent.kt      # typed events for the (unused) activity feed
-│   └── BottleMath.kt       # polynomial volume calc + intake aggregators
+│   └── BottleMath.kt       # polynomial volume calc + levelEvents (official drink/refill rules) + intake aggregators + pace
 ├── data/                   # Persistence
 │   ├── HydraDatabase.kt    # @Database — sip_log + saved_bottles + filters + filter_pauses (v4; 3→4 is a real additive migration)
 │   ├── SipEntity/Dao/Repository  # SipEntity.manualVolumeMl distinguishes BLE vs manually-logged sips
@@ -54,14 +56,17 @@ app/src/main/java/com/hydra/app/
 │   └── HealthConnectController.kt     # singleton: status StateFlow + onSipsChanged sync + watermark
 └── ui/
     ├── MainScreen.kt       # tabbed root: Today / Bottle / History / Settings; hosts UpdateDialog;
-    │                       # wires HealthConnectController to sipLog → onSipsChanged via combine()
+    │                       # wires HealthConnectController to sipLog → onSipsChanged via combine();
+    │                       # after each sync asks the bottle for UI state, clean log, quiet hours, battery/info;
+    │                       # auto-sends power-saving-off if the cap reports it on; drives FilterReminder
     ├── components/         # GlassCard, GlassNavigationBar, GradientBackground, AuroraGlow,
     │                       # HydraIcon/Logo, HydrationRing, LiquidBottle, HourlyBarChart,
     │                       # WeeklyBarChart, HydrationHeatmap, ConnectionBadge, RelativeTime,
     │                       # ManualSipDialog (volume + time picker for hand-logged sips),
     │                       # UpdateDialog (Available/Downloading/ReadyToInstall/PermissionRequired/UpToDate/Error),
     │                       # HealthConnectPrivacyDialog (shared by Settings row + rationale intent)
-    ├── screens/            # HydrationScreen, BottleScreen (hosts FilterScreen as a detail view), HistoryScreen, SettingsScreen
+    ├── screens/            # HydrationScreen (ring + pace notch), BottleScreen (Sync / Clean / Measure; hosts FilterScreen),
+    │                       # HistoryScreen (Day / Week / Month, arrows + swipe), SettingsScreen (incl. Quiet hours)
     └── theme/              # HydraColors token bag (Dark/Light) + Material3 theme
 ```
 
@@ -70,7 +75,12 @@ app/src/main/java/com/hydra/app/
 **BLE notes:**
 - `BottleConnection` callbacks fire on a binder thread — anything mutating shared state must post to its `Main.immediate` scope.
 - All parsers are `runCatching`-wrapped — never throw from the BLE thread (would crash the app).
-- `BottleConfig.BOTTLE_SIZE_ML = 1000` is hardcoded; should be derived from `RequestGetCapTofSettings` in a future session.
+- `BottleConfig.BOTTLE_SIZE_ML = 1000` is hardcoded; should be derived from `RequestGetCapTofSettings` in a future session. (The paired bottle does report 1000.)
+- **Android runs one GATT operation at a time and refuses — does not queue — a read or write started while another is in flight.** Space commands out (the post-sync sequence in `MainScreen` uses ~500 ms gaps), never send during a sync, and use `BottleConnection.refreshBatteryAndInfo()` for standard reads (sequential, awaited, retried).
+- One `ResponseGetCapTofLog` notification carries up to 7 entries plus a padded tail of truncated headers; `parseTofLogEntries` / `parseActivationLog` stop quietly at the first cut-short entry.
+- A `RequestGetCapTofState` takes ~3 s to answer (the cap takes a fresh measurement); every other Get answers in well under 100 ms.
+- Quiet-hours (do-not-disturb) times are seconds since midnight **UTC**, with 86400 for midnight — convert with `BottleClock`. They shift by an hour across DST until re-sent.
+- Intake everywhere comes from `BottleMath.levelEvents`: a drink counts once the level is >25 mL below the level at the last drink/refill; a rise >200 mL is a refill; readings at or beyond the TOF max (270 mm for 1000 mL) are ignored.
 
 ## Reference Docs
 
@@ -91,9 +101,9 @@ app/src/main/java/com/hydra/app/
 
 - **Never hardcode a BLE MAC.** Always scan by name (RPAs rotate every ~15 min on this bottle).
 - **Never delete the `captures/` directory.** It contains the bugreport snoop log + decompiled APK that all protocol decoding depends on.
-- **Build verifies via `./gradlew assembleDebug` with `JAVA_HOME` set.** No tests run by default — there are none yet.
+- **Build verifies via `./gradlew assembleDebug` with `JAVA_HOME` set.** Unit tests live in `app/src/test` (protocol parsing, level events, filter math, pace, bottle clock) — run `./gradlew testDebugUnitTest`.
 - **BLE parsing must be crash-safe.** Wrap any new parser in `runCatching` and bound-check fixed32 reads. The notification thread is a binder thread; throws crash the process.
-- **Database schema changes bump version + use destructive fallback.** Sip data is reconstructible from the bottle's own buffer; saved bottles re-pair.
+- **Database schema changes bump version + add a real `Migration`.** Additive changes (new tables/columns) must migrate so sip history, manual sips, filters and pairing survive an update — see `MIGRATION_3_4`. The destructive fallback stays only as a last resort for versions with no migration path; the bottle's buffer only reaches back a few months and manual sips and filter state are not on the bottle at all.
 - **Vercel/Next.js validator hooks fire on this Android project's `app/` directory.** They're false positives — ignore them.
 
 ## ⛔ FORBIDDEN BOTTLE COMMANDS — NEVER WIRE THESE UP
