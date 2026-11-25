@@ -23,6 +23,8 @@ import com.hydra.app.data.SipRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
@@ -94,6 +96,10 @@ data class IncomingPacket(val timestamp: Long, val bytes: ByteArray) {
 
 data class ScannedDevice(val name: String, val address: String, val rssi: Int)
 
+private const val STANDARD_READ_ATTEMPTS = 6
+private const val STANDARD_READ_RETRY_MS = 250L
+private const val STANDARD_READ_TIMEOUT_MS = 2_000L
+
 /** A water-level reading taken on request, and when the phone received it. */
 data class LiveLevel(val distanceMm: Int, val atMs: Long)
 
@@ -154,6 +160,17 @@ class BottleConnection(
     /** Latest "what is the cap doing" report; null until one arrives or after a disconnect. */
     private val _uiState = MutableStateFlow<UiStateInfo?>(null)
     val uiState: StateFlow<UiStateInfo?> = _uiState.asStateFlow()
+
+    /** Battery percentage from the standard Battery service; keeps its last value if a read fails. */
+    private val _battery = MutableStateFlow<Int?>(null)
+    val battery: StateFlow<Int?> = _battery.asStateFlow()
+
+    /** Device Information strings keyed by name ("Model", "Serial", "Firmware rev", …). */
+    private val _deviceInfo = MutableStateFlow<Map<String, String>>(emptyMap())
+    val deviceInfo: StateFlow<Map<String, String>> = _deviceInfo.asStateFlow()
+
+    private var standardReadJob: Job? = null
+    @Volatile private var pendingRead: CompletableDeferred<Unit>? = null
 
     /** Most recent on-request level reading (see [requestLevel]). */
     private val _liveLevel = MutableStateFlow<LiveLevel?>(null)
@@ -458,6 +475,7 @@ class BottleConnection(
 
     private fun handleRead(c: BluetoothGattCharacteristic, value: ByteArray, status: Int) {
         Log.i(TAG, "READ ${c.uuid} status=$status: ${value.hex()}")
+        pendingRead?.complete(Unit)
         if (status != BluetoothGatt.GATT_SUCCESS) {
             _events.tryEmit(BottleEvent.Unknown(System.currentTimeMillis(), value.copyOf()))
             return
@@ -472,6 +490,11 @@ class BottleConnection(
             BottleConfig.DI_FW_REV -> "Firmware rev" to String(value)
             BottleConfig.DI_SW_REV -> "Software rev" to String(value)
             else -> c.uuid.toString() to value.hex()
+        }
+        if (c.uuid == BottleConfig.BATTERY_LEVEL) {
+            _battery.value = value.getOrNull(0)?.let { it.toInt() and 0xFF }
+        } else {
+            _deviceInfo.value = _deviceInfo.value + (name to parsed)
         }
         _events.tryEmit(BottleEvent.StandardRead(now, name, parsed))
     }
@@ -727,6 +750,40 @@ class BottleConnection(
             BottleConfig.DI_FW_REV,
             BottleConfig.DI_SW_REV,
         ).forEach { readStandard(BottleConfig.DEVICE_INFO_SERVICE, it) }
+    }
+
+    /**
+     * Read the battery level and device information reliably. Android runs only ONE GATT
+     * operation at a time and silently refuses a read started while another read or write is
+     * still in flight — it does not queue them. So this reads one value at a time, waits for
+     * each answer before starting the next, and retries a refused read a few times.
+     */
+    fun refreshBatteryAndInfo() {
+        if (standardReadJob?.isActive == true) return
+        standardReadJob = scope.launch {
+            val targets = listOf(
+                BottleConfig.BATTERY_SERVICE to BottleConfig.BATTERY_LEVEL,
+                BottleConfig.DEVICE_INFO_SERVICE to BottleConfig.DI_FW_REV,
+                BottleConfig.DEVICE_INFO_SERVICE to BottleConfig.DI_MODEL,
+                BottleConfig.DEVICE_INFO_SERVICE to BottleConfig.DI_SERIAL,
+                BottleConfig.DEVICE_INFO_SERVICE to BottleConfig.DI_HW_REV,
+                BottleConfig.DEVICE_INFO_SERVICE to BottleConfig.DI_MANUFACTURER,
+                BottleConfig.DEVICE_INFO_SERVICE to BottleConfig.DI_SW_REV,
+            )
+            for ((service, characteristic) in targets) {
+                if (_state.value != ConnectionState.Ready) break
+                for (attempt in 1..STANDARD_READ_ATTEMPTS) {
+                    val waiter = CompletableDeferred<Unit>()
+                    pendingRead = waiter
+                    if (readStandard(service, characteristic)) {
+                        withTimeoutOrNull(STANDARD_READ_TIMEOUT_MS) { waiter.await() }
+                        break
+                    }
+                    delay(STANDARD_READ_RETRY_MS)
+                }
+            }
+            pendingRead = null
+        }
     }
 
     private fun appendPacket(bytes: ByteArray) {

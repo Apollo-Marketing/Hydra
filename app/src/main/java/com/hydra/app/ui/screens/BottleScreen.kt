@@ -43,7 +43,6 @@ import androidx.compose.ui.unit.sp
 import com.hydra.app.ble.BottleMath
 import com.hydra.app.ble.BottleConfig
 import com.hydra.app.ble.BottleConnection
-import com.hydra.app.ble.BottleEvent
 import com.hydra.app.ble.ConnectionState
 import com.hydra.app.ble.SyncState
 import com.hydra.app.data.ActiveFilter
@@ -95,30 +94,16 @@ fun BottleScreen(connection: BottleConnection, modifier: Modifier = Modifier) {
     val connState by connection.state.collectAsState()
     val syncState by connection.syncState.collectAsState()
 
-    var battery by remember { mutableStateOf<Int?>(null) }
-    var deviceInfo by remember { mutableStateOf(DeviceInfo()) }
-
-    LaunchedEffect(connection) {
-        connection.events.collect { ev ->
-            if (ev is BottleEvent.StandardRead) {
-                when (ev.charName) {
-                    "Battery" -> battery = ev.value.removeSuffix("%").toIntOrNull()
-                    "Manufacturer" -> deviceInfo = deviceInfo.copy(manufacturer = ev.value)
-                    "Model" -> deviceInfo = deviceInfo.copy(model = ev.value)
-                    "Serial" -> deviceInfo = deviceInfo.copy(serial = ev.value)
-                    "FW Rev" -> deviceInfo = deviceInfo.copy(firmware = ev.value)
-                    "HW Rev" -> deviceInfo = deviceInfo.copy(hardware = ev.value)
-                }
-            }
-        }
-    }
-
-    LaunchedEffect(connection, connState) {
-        if (connState == ConnectionState.Ready) {
-            connection.readBatteryLevel()
-            connection.readDeviceInfo()
-        }
-    }
+    // Battery and device details are read by the connection (one at a time, after each sync).
+    val battery by connection.battery.collectAsState()
+    val info by connection.deviceInfo.collectAsState()
+    val deviceInfo = DeviceInfo(
+        manufacturer = info["Manufacturer"].orEmpty(),
+        model = info["Model"].orEmpty(),
+        serial = info["Serial"].orEmpty(),
+        firmware = info["Firmware rev"].orEmpty(),
+        hardware = info["Hardware rev"].orEmpty(),
+    )
 
     // What the cap says it is doing (cleaning, power saving…). Asked for once the bottle is
     // ready and idle, then polled for a while after a Clean tap so the buttons follow

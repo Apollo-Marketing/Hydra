@@ -118,6 +118,8 @@ fun MainScreen() {
         connection.requestCleanLog()
         delay(500L)
         connection.requestQuietHours()
+        delay(500L)
+        connection.refreshBatteryAndInfo()
     }
     LaunchedEffect(connection, connState) {
         if (connState != ConnectionState.Ready) return@LaunchedEffect
