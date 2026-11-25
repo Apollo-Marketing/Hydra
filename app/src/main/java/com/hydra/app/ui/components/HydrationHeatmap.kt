@@ -37,39 +37,32 @@ fun HydrationHeatmap(
 ) {
     val colors = LocalHydraColors.current
     Column(modifier = modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Column(
-                modifier = Modifier.width(20.dp),
-                verticalArrangement = Arrangement.spacedBy(2.dp),
-            ) {
-                WeekdayLabels.take(intensities.size.coerceAtLeast(1)).forEach { d ->
-                    Text(
-                        d,
-                        color = colors.inkDim,
-                        style = MaterialTheme.typography.labelSmall,
-                    )
-                }
-            }
-            Column(
+        // Each weekday letter lives in the same row as its cells, so the two can't drift apart.
+        intensities.forEachIndexed { rowIndex, row ->
+            Row(
                 modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(2.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                intensities.forEach { row ->
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(2.dp),
-                    ) {
-                        for (i in 0 until cols) {
-                            val v = row.getOrNull(i) ?: 0
-                            val color = if (v == 0) colors.hair else Cyan.copy(alpha = (0.10f + v * 0.20f).coerceAtMost(1f))
-                            Box(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .aspectRatio(1f)
-                                    .clip(RoundedCornerShape(2.dp))
-                                    .background(color),
-                            )
-                        }
+                Text(
+                    WeekdayLabels.getOrElse(rowIndex) { "" },
+                    color = colors.inkDim,
+                    style = MaterialTheme.typography.labelSmall,
+                    modifier = Modifier.width(24.dp),
+                )
+                Row(
+                    modifier = Modifier.weight(1f),
+                    horizontalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    for (i in 0 until cols) {
+                        val v = row.getOrNull(i) ?: 0
+                        val color = if (v == 0) colors.hair else Cyan.copy(alpha = (0.10f + v * 0.20f).coerceAtMost(1f))
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .aspectRatio(1f)
+                                .clip(RoundedCornerShape(2.dp))
+                                .background(color),
+                        )
                     }
                 }
             }
