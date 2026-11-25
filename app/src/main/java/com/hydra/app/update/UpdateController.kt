@@ -29,6 +29,10 @@ class UpdateController private constructor(context: Context) {
     private var lastAvailable: UpdateState.Available? = null
 
     fun checkOnLaunch() {
+        // Dev builds don't auto-prompt: a GitHub release APK is the production package, so
+        // "updating" from the dev app would install over production instead. Manual check
+        // from Settings still works for testing the updater itself.
+        if (BuildConfig.DEBUG) return
         if (checkJob?.isActive == true) return
         checkJob = scope.launch {
             if (!prefs.autoUpdateEnabled.first()) return@launch

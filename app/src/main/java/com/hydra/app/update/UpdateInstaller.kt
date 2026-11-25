@@ -116,7 +116,9 @@ class UpdateInstaller(private val context: Context) {
     )
 
     companion object {
-        const val AUTHORITY = "com.hydra.app.fileprovider"
+        // Derived from the installed package id so the dev build (com.hydra.app.dev) gets its
+        // own provider — must match the ${applicationId}.fileprovider entry in the manifest.
+        const val AUTHORITY = com.hydra.app.BuildConfig.APPLICATION_ID + ".fileprovider"
         private const val MIME_APK = "application/vnd.android.package-archive"
         private const val SUBDIR = "updates"
         private const val POLL_INTERVAL_MS = 500L

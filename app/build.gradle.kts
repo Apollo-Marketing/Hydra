@@ -49,6 +49,12 @@ android {
     }
 
     buildTypes {
+        debug {
+            // Dev build installs as a separate app (com.hydra.app.dev, labelled "Hydra Dev")
+            // so plugging the phone in never touches the production install or its data.
+            applicationIdSuffix = ".dev"
+            versionNameSuffix = "-dev"
+        }
         release {
             if (hasReleaseKeystore) {
                 signingConfig = signingConfigs.getByName("release")
