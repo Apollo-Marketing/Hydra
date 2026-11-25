@@ -19,6 +19,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.Text
@@ -70,6 +71,7 @@ import kotlinx.coroutines.delay
 /** How long, and how often, to keep asking the cap for its state after a Clean tap. */
 private const val STATE_WATCH_MS = 120_000L
 private const val STATE_POLL_MS = 3_000L
+private const val MEASURE_TIMEOUT_MS = 8_000L
 
 @Composable
 fun BottleScreen(connection: BottleConnection, modifier: Modifier = Modifier) {
@@ -148,7 +150,18 @@ fun BottleScreen(connection: BottleConnection, modifier: Modifier = Modifier) {
     val volume = remember(sips, liveLevel) {
         BottleMath.currentVolumeMl(sips, bottleSize, liveLevel?.distanceMm, liveLevel?.atMs)
     }
-    val levelCheckedAgo = rememberRelativeTime(epochMs = liveLevel?.atMs ?: 0L, neverLabel = "Level")
+    val levelCheckedAgo = rememberRelativeTime(epochMs = liveLevel?.atMs ?: 0L, neverLabel = "Water level")
+    // "Measuring" runs from the tap until a reading newer than the tap arrives, or gives up
+    // after a few seconds so the button can't get stuck.
+    var measureSentAtMs by remember { mutableLongStateOf(0L) }
+    var measureFailed by remember { mutableStateOf(false) }
+    val measuring = measureSentAtMs > 0L && (liveLevel?.atMs ?: 0L) < measureSentAtMs
+    LaunchedEffect(measureSentAtMs) {
+        if (measureSentAtMs == 0L) return@LaunchedEffect
+        delay(MEASURE_TIMEOUT_MS)
+        if ((connection.liveLevel.value?.atMs ?: 0L) < measureSentAtMs) measureFailed = true
+        measureSentAtMs = 0L
+    }
     val lastCleanedSec by connection.lastCleanedSec.collectAsState()
     val cleanedAgo = rememberRelativeTime(epochMs = (lastCleanedSec ?: 0L) * 1000L, neverLabel = "—")
     val refills = remember(sips) { BottleMath.refillsOnDate(sips, bottleSize, today) }
@@ -239,6 +252,7 @@ fun BottleScreen(connection: BottleConnection, modifier: Modifier = Modifier) {
                 sub = if (lastSyncMs == 0L) "—" else syncedAgo,
                 primary = true,
                 enabled = connState == ConnectionState.Ready && syncState !is SyncState.Syncing,
+                busy = syncState is SyncState.Syncing,
                 icon = HydraIconName.Sync,
                 onClick = { connection.syncSipLog() },
                 modifier = Modifier.weight(1f),
@@ -259,11 +273,23 @@ fun BottleScreen(connection: BottleConnection, modifier: Modifier = Modifier) {
                 modifier = Modifier.weight(1f),
             )
             ActionButton(
-                label = "Refresh",
-                sub = levelCheckedAgo,
+                label = "Measure",
+                sub = when {
+                    measuring -> "Measuring…"
+                    measureFailed -> "No reply"
+                    else -> levelCheckedAgo
+                },
                 icon = HydraIconName.Bottle,
-                enabled = ready && !syncing,
-                onClick = { connection.requestLevel() },
+                enabled = ready && !syncing && !measuring,
+                busy = measuring,
+                onClick = {
+                    measureFailed = false
+                    measureSentAtMs = System.currentTimeMillis()
+                    if (connection.requestLevel() == null) {
+                        measureSentAtMs = 0L
+                        measureFailed = true
+                    }
+                },
                 modifier = Modifier.weight(1f),
             )
         }
@@ -479,6 +505,8 @@ private fun ActionButton(
     sub: String,
     primary: Boolean = false,
     enabled: Boolean = true,
+    /** Shows a spinner in place of the icon while the action is in progress. */
+    busy: Boolean = false,
     icon: HydraIconName,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
@@ -501,11 +529,19 @@ private fun ActionButton(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        HydraIcon(
-            name = icon,
-            size = 20.dp,
-            color = if (primary) InkOnAccent else if (enabled) colors.ink else colors.inkDim,
-        )
+        if (busy) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(20.dp),
+                color = if (primary) InkOnAccent else Cyan,
+                strokeWidth = 2.dp,
+            )
+        } else {
+            HydraIcon(
+                name = icon,
+                size = 20.dp,
+                color = if (primary) InkOnAccent else if (enabled) colors.ink else colors.inkDim,
+            )
+        }
         Text(
             label,
             color = if (primary) InkOnAccent else if (enabled) colors.ink else colors.inkDim,
