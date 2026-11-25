@@ -367,19 +367,20 @@ class BottleConnection(
     private fun emitDecodedResponse(now: Long, seq: Int?, typeUrl: String, value: ByteArray) {
         when (shortName(typeUrl)) {
             "ResponseGetCapTofLog" -> {
-                val entry = Responses.parseTofLogEntry(value)
-                if (entry != null) {
+                // One notification carries several entries (see parseTofLogEntries).
+                val entries = Responses.parseTofLogEntries(value)
+                if (entries.isNotEmpty()) {
                     // Persist + (if syncing) accumulate for page-tracking. Both happen on the
                     // single Main-immediate scope so currentPage / pageQuietJob are never
                     // touched concurrently from the binder thread.
                     scope.launch {
-                        repository.upsertAll(listOf(entry))
+                        repository.upsertAll(entries)
                         if (_syncState.value is SyncState.Syncing) {
-                            currentPage.add(entry)
+                            currentPage.addAll(entries)
                             armPageQuietTimer()
                         }
                     }
-                    _events.tryEmit(BottleEvent.SipReceived(now, seq, entry))
+                    entries.forEach { _events.tryEmit(BottleEvent.SipReceived(now, seq, it)) }
                 } else {
                     emitUnparsed(now, seq, typeUrl, value)
                 }

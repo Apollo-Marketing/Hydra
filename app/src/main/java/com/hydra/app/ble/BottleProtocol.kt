@@ -532,17 +532,37 @@ object Responses {
 
 
     /**
-     * Parse one ResponseGetCapTofLog notification.
-     * Each notification carries ONE TofLog entry wrapped in field 1 (length-delimited).
+     * Parse one ResponseGetCapTofLog notification into its sip entries.
+     *
+     * The response is `repeated TofLog = 1`: the bottle packs as many 25-byte entries as fit
+     * in one notification (7 at the 247-byte MTU Android negotiates; 1 at the default MTU,
+     * which is what the original snoop capture showed). The bottle also pads the tail of a
+     * full notification with truncated entry headers (`0a 17 0a 17 …`), so parsing stops
+     * quietly at the first entry that is cut short or malformed and returns what it has.
+     *
+     * Crash-safe: never throws, returns an empty list for anything unparseable.
      */
-    fun parseTofLogEntry(valueBytes: ByteArray): SipEntry? = runCatching {
-        if (valueBytes.size < 2 || valueBytes[0] != 0x0a.toByte()) return@runCatching null
-        val (innerLen, lenConsumed) = Wire.readVarint(valueBytes, 1)
-        val innerStart = 1 + lenConsumed
-        if (innerLen !in 0..(valueBytes.size - innerStart).toLong()) return@runCatching null
-        val end = innerStart + innerLen.toInt()
+    fun parseTofLogEntries(valueBytes: ByteArray): List<SipEntry> {
+        val out = mutableListOf<SipEntry>()
+        runCatching {
+            var pos = 0
+            while (pos < valueBytes.size) {
+                if (valueBytes[pos] != 0x0a.toByte()) break
+                val (innerLen, lenConsumed) = Wire.readVarint(valueBytes, pos + 1)
+                val innerStart = pos + 1 + lenConsumed
+                if (innerLen !in 0..(valueBytes.size - innerStart).toLong()) break
+                val end = innerStart + innerLen.toInt()
+                val entry = parseTofLog(valueBytes, innerStart, end) ?: break
+                out += entry
+                pos = end
+            }
+        }
+        return out
+    }
 
-        var pos = innerStart
+    /** Parse a single TofLog message occupying [start, end) of [buf]. Null if malformed/empty. */
+    private fun parseTofLog(buf: ByteArray, start: Int, end: Int): SipEntry? = runCatching {
+        var pos = start
         var ts = 0L
         var trigger = 0
         var distance = 0
@@ -550,22 +570,21 @@ object Responses {
         var uvTemp = 0f
 
         while (pos < end) {
-            val tag = valueBytes[pos].toInt() and 0xFF
+            val tag = buf[pos].toInt() and 0xFF
             pos++
             when (tag) {
-                0x08 -> { val (v, c) = Wire.readVarint(valueBytes, pos); ts = v; pos += c }
-                0x10 -> { val (v, c) = Wire.readVarint(valueBytes, pos); trigger = v.toInt(); pos += c }
-                0x1d -> { if (pos + 4 > end) return@runCatching null; distance = Wire.readFixed32(valueBytes, pos); pos += 4 }
-                0x25 -> { if (pos + 4 > end) return@runCatching null; kcps = Wire.readFixed32(valueBytes, pos); pos += 4 }
-                0x2d -> { if (pos + 4 > end) return@runCatching null; uvTemp = Wire.readFixed32Float(valueBytes, pos); pos += 4 }
+                0x08 -> { val (v, c) = Wire.readVarint(buf, pos); ts = v; pos += c }
+                0x10 -> { val (v, c) = Wire.readVarint(buf, pos); trigger = v.toInt(); pos += c }
+                0x1d -> { if (pos + 4 > end) return@runCatching null; distance = Wire.readFixed32(buf, pos); pos += 4 }
+                0x25 -> { if (pos + 4 > end) return@runCatching null; kcps = Wire.readFixed32(buf, pos); pos += 4 }
+                0x2d -> { if (pos + 4 > end) return@runCatching null; uvTemp = Wire.readFixed32Float(buf, pos); pos += 4 }
                 else -> {
-                    val wireType = tag and 0x07
-                    when (wireType) {
-                        0 -> { val (_, c) = Wire.readVarint(valueBytes, pos); pos += c }
+                    when (tag and 0x07) {
+                        0 -> { val (_, c) = Wire.readVarint(buf, pos); pos += c }
                         1 -> { if (pos + 8 > end) return@runCatching null; pos += 8 }
                         5 -> { if (pos + 4 > end) return@runCatching null; pos += 4 }
                         2 -> {
-                            val (l, c) = Wire.readVarint(valueBytes, pos)
+                            val (l, c) = Wire.readVarint(buf, pos)
                             pos += c
                             if (l !in 0..(end - pos).toLong()) return@runCatching null
                             pos += l.toInt()
@@ -575,7 +594,8 @@ object Responses {
                 }
             }
         }
-
+        // A varint that ran past this entry's boundary means the entry was corrupt.
+        if (pos != end) return@runCatching null
         if (ts == 0L && distance == 0 && kcps == 0) return@runCatching null
         SipEntry(ts, trigger, distance, kcps, uvTemp)
     }.getOrNull()
