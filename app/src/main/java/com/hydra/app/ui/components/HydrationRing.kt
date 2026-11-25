@@ -92,10 +92,10 @@ fun HydrationRing(
                     style = stroke,
                 )
             }
-            if (paceFraction != null && paceFraction > 0f && paceFraction < 1f) {
+            if (paceFraction != null && paceFraction > 0f) {
                 // Pace notch: a short bar across the ring at the "should be here by now" point,
                 // light with a dark edge so it reads on both the empty track and the filled arc.
-                val angle = Math.toRadians(-90.0 + 360.0 * paceFraction)
+                val angle = Math.toRadians(-90.0 + 360.0 * paceFraction.coerceAtMost(1f))
                 val center = Offset(this.size.width / 2f, this.size.height / 2f)
                 val radius = (this.size.width - stroke.width) / 2f
                 val half = stroke.width * 1.05f

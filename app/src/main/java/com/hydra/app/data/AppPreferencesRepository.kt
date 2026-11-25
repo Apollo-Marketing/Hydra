@@ -27,6 +27,13 @@ class AppPreferencesRepository private constructor(context: Context) {
         prefs[KEY_THEME_MODE]?.let { runCatching { ThemeMode.valueOf(it) }.getOrNull() }
             ?: ThemeMode.System
     }
+    /** Typical wake-up and bedtime, seconds since local midnight. Drive the day rollover and pace. */
+    val wakeSec: Flow<Int> = store.data.map { it[KEY_WAKE_SEC] ?: DEFAULT_WAKE_SEC }
+    val bedSec: Flow<Int> = store.data.map { it[KEY_BED_SEC] ?: DEFAULT_BED_SEC }
+
+    suspend fun setWakeSec(value: Int) { store.edit { it[KEY_WAKE_SEC] = value } }
+    suspend fun setBedSec(value: Int) { store.edit { it[KEY_BED_SEC] = value } }
+
     val showStreak: Flow<Boolean> = store.data.map { it[KEY_SHOW_STREAK] ?: true }
     val lastUpdateCheckMs: Flow<Long> = store.data.map { it[KEY_LAST_UPDATE_CHECK_MS] ?: 0L }
     val autoUpdateEnabled: Flow<Boolean> = store.data.map { it[KEY_AUTO_UPDATE_ENABLED] ?: true }
@@ -86,6 +93,10 @@ class AppPreferencesRepository private constructor(context: Context) {
         private val KEY_DAILY_GOAL_ML: Preferences.Key<Int> = intPreferencesKey("daily_goal_ml")
         private val KEY_LAST_SYNC_MS: Preferences.Key<Long> = longPreferencesKey("last_sync_ms")
         private val KEY_THEME_MODE: Preferences.Key<String> = stringPreferencesKey("theme_mode")
+        const val DEFAULT_WAKE_SEC = 7 * 3600
+        const val DEFAULT_BED_SEC = 23 * 3600
+        private val KEY_WAKE_SEC: Preferences.Key<Int> = intPreferencesKey("wake_sec")
+        private val KEY_BED_SEC: Preferences.Key<Int> = intPreferencesKey("bed_sec")
         private val KEY_SHOW_STREAK: Preferences.Key<Boolean> = booleanPreferencesKey("show_streak")
         private val KEY_LAST_UPDATE_CHECK_MS: Preferences.Key<Long> = longPreferencesKey("last_update_check_ms")
         private val KEY_AUTO_UPDATE_ENABLED: Preferences.Key<Boolean> = booleanPreferencesKey("auto_update_enabled")

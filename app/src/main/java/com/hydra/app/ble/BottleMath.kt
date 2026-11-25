@@ -33,23 +33,46 @@ import java.time.ZoneId
 object BottleMath {
 
     /**
-     * The local-time hour at which the "logical day" rolls over. Sips between midnight and
-     * this hour count toward the previous logical day so a late-night sip doesn't spuriously
-     * roll the user's intake total to zero or break a streak. Hardcoded by request — exposing
-     * this as a user preference can come later if there's demand.
+     * The user's typical day: when they get up and when they go to bed, as seconds since
+     * local midnight. Bedtime may be "after midnight" (e.g. wake 9 am, bed 2 am).
      */
-    const val DAY_RESET_HOUR = 3
+    data class DaySchedule(val wakeSec: Int = 7 * 3600, val bedSec: Int = 23 * 3600) {
+        /** Seconds awake, wake → bed, wrapping past midnight. A zero-length day counts as 24 h. */
+        val awakeSec: Int get() = Math.floorMod(bedSec - wakeSec, DAY_SEC).let { if (it == 0) DAY_SEC else it }
 
-    /**
-     * Convert an [Instant] to the local logical date. If the instant's local hour is below
-     * [DAY_RESET_HOUR], we attribute it to the *previous* calendar date.
-     */
-    fun logicalDateFor(instant: Instant, zone: ZoneId = ZoneId.systemDefault()): LocalDate {
-        val ldt = instant.atZone(zone).toLocalDateTime()
-        return if (ldt.hour < DAY_RESET_HOUR) ldt.toLocalDate().minusDays(1) else ldt.toLocalDate()
+        /**
+         * When one day ends and the next begins: the middle of the night's sleep, rounded
+         * down to the hour. A sip before this belongs to the day that is ending, so a 1 am
+         * glass before a 2 am bedtime still counts toward "today".
+         */
+        val resetSec: Int
+            get() {
+                val asleep = DAY_SEC - awakeSec
+                return Math.floorMod(bedSec + asleep / 2, DAY_SEC) / 3600 * 3600
+            }
+
+        /** Pace expects the goal this long before bed, so the last hours aren't catch-up drinking. */
+        val paceSec: Int get() = (awakeSec - PACE_BUFFER_SEC).coerceAtLeast(3600)
     }
 
-    /** Today's logical date — same as [LocalDate.now] outside the [0, [DAY_RESET_HOUR]) window. */
+    private const val DAY_SEC = 86_400
+    private const val PACE_BUFFER_SEC = 2 * 3600
+
+    /**
+     * Seconds after local midnight at which the logical day rolls over. Process-wide because
+     * every aggregator below buckets by it; `MainScreen` sets it from the user's
+     * [DaySchedule] before any screen draws. Defaults to 3 am.
+     */
+    @Volatile var dayResetSec: Int = 3 * 3600
+
+    /**
+     * Convert an [Instant] to the local logical date: instants before [dayResetSec] belong
+     * to the *previous* calendar date.
+     */
+    fun logicalDateFor(instant: Instant, zone: ZoneId = ZoneId.systemDefault()): LocalDate =
+        instant.atZone(zone).toLocalDateTime().minusSeconds(dayResetSec.toLong()).toLocalDate()
+
+    /** Today's logical date — [LocalDate.now], or yesterday if the clock is before [dayResetSec]. */
     fun currentLogicalDate(zone: ZoneId = ZoneId.systemDefault()): LocalDate =
         logicalDateFor(Instant.now(), zone)
 
@@ -176,7 +199,7 @@ object BottleMath {
     // ── Aggregators ───────────────────────────────────────────────────────────────────────
 
     /**
-     * Intake in mL per **logical date** (3am-anchored, see [DAY_RESET_HOUR]) across the whole
+     * Intake in mL per **logical date** (see [dayResetSec]) across the whole
      * history: detected drinks plus manual sips. Dates with no intake are absent.
      */
     fun dailyIntakeMl(entries: List<SipEntity>, bottleSizeMl: Int): Map<LocalDate, Double> {
@@ -248,27 +271,24 @@ object BottleMath {
 
     // ── Pace ──────────────────────────────────────────────────────────────────────────────
 
-    /** Pace starts counting at this local hour… */
-    const val PACE_START_HOUR = 7
-
-    /** …and expects the whole goal by this one, leaving the late evening free of catch-up drinking. */
-    const val PACE_END_HOUR = 21
-
     /**
      * Share of the daily goal (0..1) that should be drunk by [now] to be "on pace": an even
-     * spread between [PACE_START_HOUR] and [PACE_END_HOUR]. There is no evidence-based
-     * hour-by-hour schedule; the common guidance is simply to spread water through the
-     * waking day and ease off a few hours before bed, which is what this window does.
+     * spread from the user's wake-up time until two hours before their bedtime. There is no
+     * evidence-based hour-by-hour schedule; the common guidance is to spread water through
+     * the waking day and ease off before bed, which is what this window does.
      *
-     * [logicalDate] is the 3am-anchored day being shown: once the clock passes midnight the
-     * day's window is over, so the answer is 1 until the day rolls at 3am.
+     * [logicalDate] is the day being shown; its pace window starts at that day's wake-up.
      */
-    fun paceFraction(now: java.time.ZonedDateTime, logicalDate: LocalDate = logicalDateFor(now.toInstant(), now.zone)): Float {
-        if (now.toLocalDate().isAfter(logicalDate)) return 1f
-        val start = PACE_START_HOUR * 3600
-        val end = PACE_END_HOUR * 3600
-        val sec = now.toLocalTime().toSecondOfDay()
-        return ((sec - start).toFloat() / (end - start)).coerceIn(0f, 1f)
+    fun paceFraction(
+        now: java.time.ZonedDateTime,
+        schedule: DaySchedule,
+        logicalDate: LocalDate = logicalDateFor(now.toInstant(), now.zone),
+    ): Float {
+        // Wake-up is the first wake time at or after the day's rollover.
+        val wakeOffset = Math.floorMod(schedule.wakeSec - dayResetSec, DAY_SEC)
+        val wake = logicalDate.atStartOfDay().plusSeconds((dayResetSec + wakeOffset).toLong())
+        val elapsed = java.time.Duration.between(wake, now.toLocalDateTime()).seconds
+        return (elapsed.toFloat() / schedule.paceSec).coerceIn(0f, 1f)
     }
 
     data class RefillSummary(val count: Int, val totalMl: Double)

@@ -1,5 +1,7 @@
 package com.hydra.app.ui
 
+import com.hydra.app.ble.BottleMath
+import androidx.compose.runtime.key
 import android.content.Intent
 import android.net.Uri
 import android.provider.Settings
@@ -152,6 +154,13 @@ fun MainScreen() {
         )
     }
 
+    // The user's wake/bed times decide when a day rolls over. Set before any tab draws, and
+    // rebuild the tabs when it changes so every "today" and daily total is re-bucketed.
+    val wakeSec by prefs.wakeSec.collectAsState(initial = AppPreferencesRepository.DEFAULT_WAKE_SEC)
+    val bedSec by prefs.bedSec.collectAsState(initial = AppPreferencesRepository.DEFAULT_BED_SEC)
+    val dayResetSec = BottleMath.DaySchedule(wakeSec, bedSec).resetSec
+    BottleMath.dayResetSec = dayResetSec
+
     GradientBackground {
         Box(modifier = Modifier.fillMaxSize()) {
             AuroraGlow()
@@ -167,7 +176,7 @@ fun MainScreen() {
                 },
             ) { innerPadding ->
                 Box(modifier = Modifier.fillMaxSize().padding(innerPadding)) {
-                    when (selectedTab) {
+                    key(dayResetSec) { when (selectedTab) {
                         TAB_HYDRATION -> HydrationScreen(
                             connection = connection,
                             onReconnect = {
@@ -177,7 +186,7 @@ fun MainScreen() {
                         TAB_BOTTLE -> BottleScreen(connection = connection)
                         TAB_HISTORY -> HistoryScreen()
                         TAB_SETTINGS -> SettingsScreen(connection = connection)
-                    }
+                    } }
                 }
             }
         }

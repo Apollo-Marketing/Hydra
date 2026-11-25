@@ -1,5 +1,6 @@
 package com.hydra.app.ui.screens
 
+import com.hydra.app.ble.BottleMath
 import com.hydra.app.ble.BottleClock
 import com.hydra.app.ble.BottleConnection
 import com.hydra.app.ble.ConnectionState
@@ -208,6 +209,8 @@ fun SettingsScreen(connection: BottleConnection, modifier: Modifier = Modifier) 
                 )
             }
         }
+
+        YourDayGroup(prefs)
 
         QuietHoursGroup(connection)
 
@@ -459,6 +462,60 @@ private fun DailyGoalCard(goalMl: Int, onGoalChange: (Int) -> Unit) {
                 }
             }
         }
+    }
+}
+
+/**
+ * Typical wake-up and bedtime. These decide when "today" rolls over (the middle of the
+ * night's sleep) and the pace shown on the Today ring (wake-up until two hours before bed).
+ */
+@Composable
+private fun YourDayGroup(prefs: AppPreferencesRepository) {
+    val scope = rememberCoroutineScope()
+    val wakeSec by prefs.wakeSec.collectAsState(initial = AppPreferencesRepository.DEFAULT_WAKE_SEC)
+    val bedSec by prefs.bedSec.collectAsState(initial = AppPreferencesRepository.DEFAULT_BED_SEC)
+    var picking by rememberSaveable { mutableStateOf<String?>(null) }
+    val fmt = DateTimeFormatter.ofPattern("h:mm a", Locale.getDefault())
+    fun label(sec: Int) = LocalTime.ofSecondOfDay(sec.toLong()).format(fmt).lowercase()
+    val schedule = BottleMath.DaySchedule(wakeSec, bedSec)
+
+    SettingsGroup(title = "Your day") {
+        SettingsRow(
+            label = "Wake up",
+            value = label(wakeSec),
+            end = RowEnd.Arrow,
+            onClick = { picking = "wake" },
+        )
+        SettingsRow(
+            label = "Bedtime",
+            value = label(bedSec),
+            end = RowEnd.Arrow,
+            onClick = { picking = "bed" },
+        )
+        SettingsRow(
+            label = "New day starts at ${label(schedule.resetSec)}",
+            // No trailing full stop: some locales format the time as "9:00 p.m.".
+            value = "Anything you drink before then counts toward the day before. " +
+                "Pace aims to reach your goal by ${label(Math.floorMod(wakeSec + schedule.paceSec, 86_400))}",
+            end = RowEnd.None,
+            last = true,
+            onClick = {},
+        )
+    }
+
+    val which = picking
+    if (which != null) {
+        val initial = if (which == "wake") wakeSec else bedSec
+        SipTimePickerDialog(
+            initialHour = initial / 3600,
+            initialMinute = (initial % 3600) / 60,
+            onConfirm = { h, m ->
+                val sec = h * 3600 + m * 60
+                scope.launch { if (which == "wake") prefs.setWakeSec(sec) else prefs.setBedSec(sec) }
+                picking = null
+            },
+            onDismiss = { picking = null },
+        )
     }
 }
 

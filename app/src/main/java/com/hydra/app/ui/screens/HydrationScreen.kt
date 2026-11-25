@@ -157,7 +157,9 @@ fun HydrationScreen(
                 paceNow = java.time.ZonedDateTime.now()
             }
         }
-        val paceFraction = BottleMath.paceFraction(paceNow, today)
+        val wakeSec by prefs.wakeSec.collectAsState(initial = AppPreferencesRepository.DEFAULT_WAKE_SEC)
+        val bedSec by prefs.bedSec.collectAsState(initial = AppPreferencesRepository.DEFAULT_BED_SEC)
+        val paceFraction = BottleMath.paceFraction(paceNow, BottleMath.DaySchedule(wakeSec, bedSec), today)
         val paceTargetMl = dailyGoal * paceFraction
         val paceDiffMl = todayMl - paceTargetMl
         val goalReached = dailyGoal > 0 && todayMl >= dailyGoal
@@ -188,7 +190,7 @@ fun HydrationScreen(
                 }
                 Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Text(paceText, color = paceColor, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyMedium)
-                    if (!goalReached && paceFraction < 1f) {
+                    if (!goalReached) {
                         Text(
                             "Aim for ${"%,d".format(paceTargetMl.roundToInt())} ml by now",
                             color = colors.inkSoft,
