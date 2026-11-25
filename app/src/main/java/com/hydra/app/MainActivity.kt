@@ -1,5 +1,6 @@
 package com.hydra.app
 
+import com.hydra.app.sync.AppForeground
 import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -26,6 +27,16 @@ private const val ACTION_HC_RATIONALE = "androidx.health.ACTION_SHOW_PERMISSIONS
 private const val CATEGORY_HEALTH_PERMISSIONS = "android.intent.category.HEALTH_PERMISSIONS"
 
 class MainActivity : ComponentActivity() {
+    override fun onStart() {
+        super.onStart()
+        AppForeground.set(true)
+    }
+
+    override fun onStop() {
+        AppForeground.set(false)
+        super.onStop()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()

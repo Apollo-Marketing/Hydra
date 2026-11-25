@@ -122,6 +122,9 @@ fun SettingsScreen(connection: BottleConnection, modifier: Modifier = Modifier) 
     val dailyGoalMl by prefs.dailyGoalMl.collectAsState(initial = AppPreferencesRepository.DEFAULT_DAILY_GOAL_ML)
     val themeMode by prefs.themeMode.collectAsState(initial = ThemeMode.System)
     val showStreak by prefs.showStreak.collectAsState(initial = true)
+    val backgroundSyncEnabled by prefs.backgroundSyncEnabled.collectAsState(initial = true)
+    val lastBackgroundSyncMs by prefs.lastBackgroundSyncMs.collectAsState(initial = 0L)
+    val lastBackgroundSync = rememberRelativeTime(lastBackgroundSyncMs, neverLabel = "not yet")
     val autoUpdateEnabled by prefs.autoUpdateEnabled.collectAsState(initial = true)
     val lastUpdateCheckMs by prefs.lastUpdateCheckMs.collectAsState(initial = 0L)
     val hcStatus by healthConnect.status.collectAsState()
@@ -204,8 +207,18 @@ fun SettingsScreen(connection: BottleConnection, modifier: Modifier = Modifier) 
                     label = "Units",
                     value = "Milliliters",
                     end = RowEnd.None,
-                    last = true,
                     onClick = {},
+                )
+                SettingsRow(
+                    label = "Background sync",
+                    value = if (backgroundSyncEnabled) {
+                        "Checks your bottle about once an hour · last: $lastBackgroundSync"
+                    } else {
+                        "Off. Syncs only while Hydra is open"
+                    },
+                    end = if (backgroundSyncEnabled) RowEnd.ToggleOn else RowEnd.ToggleOff,
+                    last = true,
+                    onClick = { scope.launch { prefs.setBackgroundSyncEnabled(!backgroundSyncEnabled) } },
                 )
             }
         }

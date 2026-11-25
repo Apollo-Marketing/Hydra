@@ -34,6 +34,13 @@ class AppPreferencesRepository private constructor(context: Context) {
     suspend fun setWakeSec(value: Int) { store.edit { it[KEY_WAKE_SEC] = value } }
     suspend fun setBedSec(value: Int) { store.edit { it[KEY_BED_SEC] = value } }
 
+    /** Hourly background check-in with the bottle (see `sync/BackgroundSync.kt`). */
+    val backgroundSyncEnabled: Flow<Boolean> = store.data.map { it[KEY_BG_SYNC_ENABLED] ?: true }
+    val lastBackgroundSyncMs: Flow<Long> = store.data.map { it[KEY_LAST_BG_SYNC_MS] ?: 0L }
+
+    suspend fun setBackgroundSyncEnabled(value: Boolean) { store.edit { it[KEY_BG_SYNC_ENABLED] = value } }
+    suspend fun setLastBackgroundSync(ms: Long) { store.edit { it[KEY_LAST_BG_SYNC_MS] = ms } }
+
     val showStreak: Flow<Boolean> = store.data.map { it[KEY_SHOW_STREAK] ?: true }
     val lastUpdateCheckMs: Flow<Long> = store.data.map { it[KEY_LAST_UPDATE_CHECK_MS] ?: 0L }
     val autoUpdateEnabled: Flow<Boolean> = store.data.map { it[KEY_AUTO_UPDATE_ENABLED] ?: true }
@@ -97,6 +104,8 @@ class AppPreferencesRepository private constructor(context: Context) {
         const val DEFAULT_BED_SEC = 23 * 3600
         private val KEY_WAKE_SEC: Preferences.Key<Int> = intPreferencesKey("wake_sec")
         private val KEY_BED_SEC: Preferences.Key<Int> = intPreferencesKey("bed_sec")
+        private val KEY_BG_SYNC_ENABLED: Preferences.Key<Boolean> = booleanPreferencesKey("bg_sync_enabled")
+        private val KEY_LAST_BG_SYNC_MS: Preferences.Key<Long> = longPreferencesKey("last_bg_sync_ms")
         private val KEY_SHOW_STREAK: Preferences.Key<Boolean> = booleanPreferencesKey("show_streak")
         private val KEY_LAST_UPDATE_CHECK_MS: Preferences.Key<Long> = longPreferencesKey("last_update_check_ms")
         private val KEY_AUTO_UPDATE_ENABLED: Preferences.Key<Boolean> = booleanPreferencesKey("auto_update_enabled")

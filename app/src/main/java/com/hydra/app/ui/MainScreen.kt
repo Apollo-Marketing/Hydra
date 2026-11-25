@@ -1,5 +1,7 @@
 package com.hydra.app.ui
 
+import com.hydra.app.sync.AppForeground
+import com.hydra.app.sync.BackgroundSync
 import com.hydra.app.ble.DoNotDisturbState
 import com.hydra.app.ble.BottleClock
 import com.hydra.app.ble.BottleMath
@@ -56,6 +58,9 @@ private const val TAB_BOTTLE = 1
 private const val TAB_HISTORY = 2
 private const val TAB_SETTINGS = 3
 
+/** How long after leaving the app the bottle connection is kept, to ride out quick app switches. */
+private const val BACKGROUND_DISCONNECT_MS = 30_000L
+
 @Composable
 fun MainScreen() {
     var selectedTab by rememberSaveable { mutableIntStateOf(TAB_HYDRATION) }
@@ -74,8 +79,23 @@ fun MainScreen() {
     val connState by connection.state.collectAsState()
     val updateState by updateController.state.collectAsState()
 
-    LaunchedEffect(firstSavedName, connState) {
+    // The screen holds the bottle connection only while the app is in front. Shortly after it
+    // goes to the background the link is dropped, so the bottle isn't kept connected (and the
+    // phone isn't left retrying scans) for as long as Android keeps the app alive. From then
+    // on the hourly background sync owns the bottle.
+    val inForeground by AppForeground.visible.collectAsState()
+    LaunchedEffect(connection, inForeground) {
+        if (!inForeground) {
+            delay(BACKGROUND_DISCONNECT_MS)
+            connection.stop()
+        }
+    }
+    val backgroundSyncEnabled by prefs.backgroundSyncEnabled.collectAsState(initial = true)
+    LaunchedEffect(backgroundSyncEnabled) { BackgroundSync.apply(context, backgroundSyncEnabled) }
+
+    LaunchedEffect(firstSavedName, connState, inForeground) {
         val name = firstSavedName ?: return@LaunchedEffect
+        if (!inForeground) return@LaunchedEffect
         when (connState) {
             ConnectionState.Disconnected -> {
                 delay(500L)

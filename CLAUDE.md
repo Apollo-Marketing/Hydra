@@ -49,6 +49,8 @@ app/src/main/java/com/hydra/app/
 ├── filter/                 # Filter tracking
 │   ├── FilterMath.kt       # types/capacities + health = lower of volume gauge and 60-day age gauge (mirrors official app)
 │   └── FilterReminder.kt   # replacement notification + age-milestone alarms + receiver
+├── sync/                   # Background sync
+│   └── BackgroundSync.kt   # AppForeground flag, hourly WorkManager schedule, BottleSyncWorker (own short-lived BottleConnection)
 ├── health/                 # Health Connect bridge — write-only sync of sip data
 │   ├── HealthConnectAvailability.kt   # sealed Available/NotInstalled/UpdateRequired/Unsupported
 │   ├── HealthConnectGateway.kt        # SOLE point of contact with androidx.health.connect.client.*
@@ -81,6 +83,7 @@ app/src/main/java/com/hydra/app/
 - A `RequestGetCapTofState` takes ~3 s to answer (the cap takes a fresh measurement); every other Get answers in well under 100 ms.
 - Quiet-hours (do-not-disturb) times are seconds since midnight **UTC**, with 86400 for midnight — convert with `BottleClock`. Quiet hours always equal the sleep hours from Settings → Your day (bedtime → wake-up); `MainScreen` rewrites them whenever the bottle's window is on but doesn't match, which also corrects DST shifts.
 - The logical day rolls over at `BottleMath.dayResetSec`, a process-wide value `MainScreen` sets from the user's wake-up/bedtime (`DaySchedule`, Settings → Your day): the middle of the night's sleep, rounded down to the hour (default 3 am). Pace on the Today ring runs from wake-up to two hours before bedtime.
+- Only one connection to the bottle can exist. The screen's `BottleConnection` is held only while the app is in front (dropped 30 s after backgrounding); in the background the hourly `BottleSyncWorker` makes its own brief connection and skips or aborts if the app is open. Hydra and Hydra Dev both run this, so they can contend for the bottle.
 - Intake everywhere comes from `BottleMath.levelEvents`: a drink counts once the level is >25 mL below the level at the last drink/refill; a rise >200 mL is a refill; readings at or beyond the TOF max (270 mm for 1000 mL) are ignored.
 
 ## Reference Docs
