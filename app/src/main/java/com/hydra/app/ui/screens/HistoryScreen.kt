@@ -1,5 +1,17 @@
 package com.hydra.app.ui.screens
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -126,13 +138,21 @@ fun HistoryScreen(modifier: Modifier = Modifier) {
         HistoryRange.Week -> weekRangeLabel(anchor)
         HistoryRange.Month -> month.format(DateTimeFormatter.ofPattern("MMMM yyyy", Locale.getDefault()))
     }
-    fun step(dir: Long) = moveTo(
-        when (range) {
-            HistoryRange.Day -> anchor.plusDays(dir)
-            HistoryRange.Week -> anchor.plusDays(7 * dir)
-            HistoryRange.Month -> month.plusMonths(dir).atEndOfMonth()
-        },
-    )
+    // +1 when the last move went forward in time, -1 when it went back; picks the slide direction.
+    var slideDir by remember { mutableIntStateOf(1) }
+    fun step(dir: Long) {
+        if (dir > 0 && !canGoForward) return
+        slideDir = if (dir > 0) 1 else -1
+        moveTo(
+            when (range) {
+                HistoryRange.Day -> anchor.plusDays(dir)
+                HistoryRange.Week -> anchor.plusDays(7 * dir)
+                HistoryRange.Month -> month.plusMonths(dir).atEndOfMonth()
+            },
+        )
+    }
+    val currentStep by rememberUpdatedState<(Long) -> Unit> { step(it) }
+    val swipeThresholdPx = with(LocalDensity.current) { 56.dp.toPx() }
     val openDay: (LocalDate) -> Unit = { date ->
         if (date <= today) {
             moveTo(date)
@@ -143,6 +163,19 @@ fun HistoryScreen(modifier: Modifier = Modifier) {
     Column(
         modifier = modifier
             .fillMaxSize()
+            // Swipe sideways anywhere on the tab to move through time: like turning a page,
+            // swiping left goes forward and swiping right goes back. One step per swipe.
+            .pointerInput(Unit) {
+                var dragged = 0f
+                detectHorizontalDragGestures(
+                    onDragStart = { dragged = 0f },
+                    onHorizontalDrag = { _, amount -> dragged += amount },
+                    onDragEnd = {
+                        if (dragged <= -swipeThresholdPx) currentStep(1L)
+                        else if (dragged >= swipeThresholdPx) currentStep(-1L)
+                    },
+                )
+            }
             .verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
@@ -173,138 +206,158 @@ fun HistoryScreen(modifier: Modifier = Modifier) {
             StepButton(icon = HydraIconName.Arrow, enabled = canGoForward, onClick = { step(1) })
         }
 
-        when (range) {
-            HistoryRange.Day -> {
-                val totalMl = daily[anchor] ?: 0.0
-                val goalPct = if (dailyGoal > 0) (totalMl / dailyGoal * 100).roundToInt() else 0
-                GlassCard(modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp), contentPadding = 16.dp) {
-                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        SummaryRow(
-                            leftLabel = "Total",
-                            leftValue = "%,d".format(totalMl.roundToInt()),
-                            leftUnit = " ml",
-                            rightLabel = "Of goal",
-                            rightValue = goalPct.toString(),
-                            rightUnit = " %",
-                        )
-                        HourlyBarChart(intakePerHour = hourly[anchor] ?: DoubleArray(24))
-                    }
+        AnimatedContent(
+            targetState = range to anchor,
+            transitionSpec = {
+                if (initialState.first != targetState.first) {
+                    fadeIn(tween(180)) togetherWith fadeOut(tween(120))
+                } else {
+                    val dir = slideDir
+                    (slideInHorizontally(tween(220)) { it * dir } + fadeIn(tween(220))) togetherWith
+                        (slideOutHorizontally(tween(220)) { -it * dir } + fadeOut(tween(160)))
                 }
-
-                val rows = remember(events, anchor) { sipsForDay(events, anchor, zone) }
-                GlassCard(modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp), contentPadding = 14.dp) {
-                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                        Text(
-                            if (anchor == today) "Today's sips" else "Sips",
-                            color = colors.ink,
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Medium,
-                            modifier = Modifier.padding(bottom = 6.dp),
-                        )
-                        if (rows.isEmpty()) {
-                            Text("No sips logged this day.", color = colors.inkDim, style = MaterialTheme.typography.bodySmall)
-                        } else {
-                            rows.forEachIndexed { idx, entry ->
-                                SipTimelineRow(
-                                    entry = entry,
-                                    last = idx == rows.lastIndex,
-                                    onDelete = if (entry.isManual) {
-                                        { scope.launch { sipRepo.deleteManual(entry.timestampSec) } }
-                                    } else null,
-                                )
-                            }
+            },
+            label = "history-period",
+        ) { (shownRange, shownAnchor) ->
+            // Shadow the outer names so each page keeps drawing its own period while it slides out.
+            @Suppress("NAME_SHADOWING") val range = shownRange
+            @Suppress("NAME_SHADOWING") val anchor = shownAnchor
+            @Suppress("NAME_SHADOWING") val month = YearMonth.from(shownAnchor)
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            when (range) {
+                HistoryRange.Day -> {
+                    val totalMl = daily[anchor] ?: 0.0
+                    val goalPct = if (dailyGoal > 0) (totalMl / dailyGoal * 100).roundToInt() else 0
+                    GlassCard(modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp), contentPadding = 16.dp) {
+                        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                            SummaryRow(
+                                leftLabel = "Total",
+                                leftValue = "%,d".format(totalMl.roundToInt()),
+                                leftUnit = " ml",
+                                rightLabel = "Of goal",
+                                rightValue = goalPct.toString(),
+                                rightUnit = " %",
+                            )
+                            HourlyBarChart(intakePerHour = hourly[anchor] ?: DoubleArray(24))
                         }
                     }
-                }
-            }
 
-            HistoryRange.Week -> {
-                val week = (6 downTo 0).map { anchor.minusDays(it.toLong()) }.map { it to (daily[it] ?: 0.0) }
-                val avgMl = week.map { it.second }.average()
-                val goalsHit = week.count { dailyGoal > 0 && it.second >= dailyGoal }
-                GlassCard(modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp), contentPadding = 16.dp) {
-                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        SummaryRow(
-                            leftLabel = "Daily average",
-                            leftValue = "%,d".format(avgMl.roundToInt()),
-                            leftUnit = " ml",
-                            rightLabel = "Goals hit",
-                            rightValue = goalsHit.toString(),
-                            rightUnit = " / ${week.size}",
-                        )
-                        // Transparent tap targets over each bar + label column open that day.
-                        Box {
-                            WeeklyBarChart(daily = week, goalMl = dailyGoal, today = today)
-                            Row(modifier = Modifier.matchParentSize(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                week.forEach { (date, _) ->
-                                    Box(modifier = Modifier.weight(1f).fillMaxSize().clickable { openDay(date) })
+                    val rows = remember(events, anchor) { sipsForDay(events, anchor, zone) }
+                    GlassCard(modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp), contentPadding = 14.dp) {
+                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text(
+                                if (anchor == today) "Today's sips" else "Sips",
+                                color = colors.ink,
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Medium,
+                                modifier = Modifier.padding(bottom = 6.dp),
+                            )
+                            if (rows.isEmpty()) {
+                                Text("No sips logged this day.", color = colors.inkDim, style = MaterialTheme.typography.bodySmall)
+                            } else {
+                                rows.forEachIndexed { idx, entry ->
+                                    SipTimelineRow(
+                                        entry = entry,
+                                        last = idx == rows.lastIndex,
+                                        onDelete = if (entry.isManual) {
+                                            { scope.launch { sipRepo.deleteManual(entry.timestampSec) } }
+                                        } else null,
+                                    )
                                 }
                             }
                         }
                     }
                 }
 
-                val heatmapMaxMl = week.maxOfOrNull { (date, _) -> hourly[date]?.slice(6 until 22)?.maxOrNull() ?: 0.0 } ?: 0.0
-                // Rows are labelled Monday-first, so order the 7 days by weekday.
-                val heatmap = week.sortedBy { it.first.dayOfWeek }.map { (date, _) ->
-                    val arr = hourly[date]
-                    (6 until 22).map { h -> quantizeIntensity(arr?.get(h) ?: 0.0, heatmapMaxMl) }
-                }
-                GlassCard(modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp), contentPadding = 14.dp) {
-                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Text("When you drink", color = colors.ink, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Medium)
-                            HeatmapLegend()
+                HistoryRange.Week -> {
+                    val week = (6 downTo 0).map { anchor.minusDays(it.toLong()) }.map { it to (daily[it] ?: 0.0) }
+                    val avgMl = week.map { it.second }.average()
+                    val goalsHit = week.count { dailyGoal > 0 && it.second >= dailyGoal }
+                    GlassCard(modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp), contentPadding = 16.dp) {
+                        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                            SummaryRow(
+                                leftLabel = "Daily average",
+                                leftValue = "%,d".format(avgMl.roundToInt()),
+                                leftUnit = " ml",
+                                rightLabel = "Goals hit",
+                                rightValue = goalsHit.toString(),
+                                rightUnit = " / ${week.size}",
+                            )
+                            // Transparent tap targets over each bar + label column open that day.
+                            Box {
+                                WeeklyBarChart(daily = week, goalMl = dailyGoal, today = today)
+                                Row(modifier = Modifier.matchParentSize(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    week.forEach { (date, _) ->
+                                        Box(modifier = Modifier.weight(1f).fillMaxSize().clickable { openDay(date) })
+                                    }
+                                }
+                            }
                         }
-                        HydrationHeatmap(intensities = heatmap, cols = 16)
+                    }
+
+                    val heatmapMaxMl = week.maxOfOrNull { (date, _) -> hourly[date]?.slice(6 until 22)?.maxOrNull() ?: 0.0 } ?: 0.0
+                    // Rows are labelled Monday-first, so order the 7 days by weekday.
+                    val heatmap = week.sortedBy { it.first.dayOfWeek }.map { (date, _) ->
+                        val arr = hourly[date]
+                        (6 until 22).map { h -> quantizeIntensity(arr?.get(h) ?: 0.0, heatmapMaxMl) }
+                    }
+                    GlassCard(modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp), contentPadding = 14.dp) {
+                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text("When you drink", color = colors.ink, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Medium)
+                                HeatmapLegend()
+                            }
+                            HydrationHeatmap(intensities = heatmap, cols = 16)
+                        }
+                    }
+                }
+
+                HistoryRange.Month -> {
+                    // Average and goal count only cover days that have happened.
+                    val lastDay = if (month == YearMonth.from(today)) today.dayOfMonth else month.lengthOfMonth()
+                    val days = (1..lastDay).map { month.atDay(it) }.map { it to (daily[it] ?: 0.0) }
+                    val avgMl = days.map { it.second }.average()
+                    val goalsHit = days.count { dailyGoal > 0 && it.second >= dailyGoal }
+                    val best = days.maxByOrNull { it.second }?.takeIf { it.second > 0 }
+                    GlassCard(modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp), contentPadding = 16.dp) {
+                        Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                            SummaryRow(
+                                leftLabel = "Daily average",
+                                leftValue = "%,d".format(avgMl.roundToInt()),
+                                leftUnit = " ml",
+                                rightLabel = "Goals hit",
+                                rightValue = goalsHit.toString(),
+                                rightUnit = " / ${days.size}",
+                            )
+                            MonthCalendar(
+                                month = month,
+                                daily = daily,
+                                goalMl = dailyGoal,
+                                today = today,
+                                onDayClick = openDay,
+                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(
+                                    best?.let { (date, ml) ->
+                                        "Best day: ${date.format(DateTimeFormatter.ofPattern("MMM d", Locale.getDefault()))} · ${"%,d".format(ml.roundToInt())} ml"
+                                    } ?: "No sips this month.",
+                                    color = colors.inkSoft,
+                                    style = MaterialTheme.typography.bodySmall,
+                                )
+                                HeatmapLegend()
+                            }
+                        }
                     }
                 }
             }
-
-            HistoryRange.Month -> {
-                // Average and goal count only cover days that have happened.
-                val lastDay = if (month == YearMonth.from(today)) today.dayOfMonth else month.lengthOfMonth()
-                val days = (1..lastDay).map { month.atDay(it) }.map { it to (daily[it] ?: 0.0) }
-                val avgMl = days.map { it.second }.average()
-                val goalsHit = days.count { dailyGoal > 0 && it.second >= dailyGoal }
-                val best = days.maxByOrNull { it.second }?.takeIf { it.second > 0 }
-                GlassCard(modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp), contentPadding = 16.dp) {
-                    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                        SummaryRow(
-                            leftLabel = "Daily average",
-                            leftValue = "%,d".format(avgMl.roundToInt()),
-                            leftUnit = " ml",
-                            rightLabel = "Goals hit",
-                            rightValue = goalsHit.toString(),
-                            rightUnit = " / ${days.size}",
-                        )
-                        MonthCalendar(
-                            month = month,
-                            daily = daily,
-                            goalMl = dailyGoal,
-                            today = today,
-                            onDayClick = openDay,
-                        )
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Text(
-                                best?.let { (date, ml) ->
-                                    "Best day: ${date.format(DateTimeFormatter.ofPattern("MMM d", Locale.getDefault()))} · ${"%,d".format(ml.roundToInt())} ml"
-                                } ?: "No sips this month.",
-                                color = colors.inkSoft,
-                                style = MaterialTheme.typography.bodySmall,
-                            )
-                            HeatmapLegend()
-                        }
-                    }
-                }
             }
         }
 
