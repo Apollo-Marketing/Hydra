@@ -1,5 +1,7 @@
 package com.hydra.app.ui.screens
 
+import com.hydra.app.ui.theme.Ok
+import com.hydra.app.ui.theme.Warn
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -147,16 +149,53 @@ fun HydrationScreen(
             )
         }
 
-        Box(
+        // Pace: where an even spread over the waking day says you should be right now.
+        var paceNow by remember { mutableStateOf(java.time.ZonedDateTime.now()) }
+        LaunchedEffect(Unit) {
+            while (true) {
+                delay(60_000L)
+                paceNow = java.time.ZonedDateTime.now()
+            }
+        }
+        val paceFraction = BottleMath.paceFraction(paceNow, today)
+        val paceTargetMl = dailyGoal * paceFraction
+        val paceDiffMl = todayMl - paceTargetMl
+        val goalReached = dailyGoal > 0 && todayMl >= dailyGoal
+        val showPace = dailyGoal > 0 && paceFraction > 0f
+
+        Column(
             modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-            contentAlignment = Alignment.Center,
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            HydrationRing(progress = ringProgress) {
+            HydrationRing(
+                progress = ringProgress,
+                paceFraction = if (showPace && !goalReached) paceFraction else null,
+            ) {
                 HydrationRingCenter(
                     eyebrow = "Today",
                     percent = percent,
                     footer = "${"%,d".format(todayMl.roundToInt())} of ${"%,d".format(dailyGoal)} ml",
                 )
+            }
+            if (showPace) {
+                val onPaceBand = dailyGoal * 0.05
+                val (paceText, paceColor) = when {
+                    goalReached -> "Goal reached" to Ok
+                    paceDiffMl >= onPaceBand -> "${"%,d".format(paceDiffMl.roundToInt())} ml ahead of pace" to Ok
+                    paceDiffMl <= -onPaceBand -> "${"%,d".format((-paceDiffMl).roundToInt())} ml behind pace" to Warn
+                    else -> "On pace" to Ok
+                }
+                Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(paceText, color = paceColor, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyMedium)
+                    if (!goalReached && paceFraction < 1f) {
+                        Text(
+                            "Aim for ${"%,d".format(paceTargetMl.roundToInt())} ml by now",
+                            color = colors.inkSoft,
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                }
             }
         }
 

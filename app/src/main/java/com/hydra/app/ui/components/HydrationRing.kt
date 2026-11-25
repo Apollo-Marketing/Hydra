@@ -40,6 +40,8 @@ fun HydrationRing(
     modifier: Modifier = Modifier,
     size: Dp = 240.dp,
     strokeWidth: Dp = 12.dp,
+    /** Where on the ring (0..1) the user should be by now; draws a notch there. Null hides it. */
+    paceFraction: Float? = null,
     centerContent: @Composable () -> Unit,
 ) {
     val colors = LocalHydraColors.current
@@ -89,6 +91,19 @@ fun HydrationRing(
                     size = arcSize,
                     style = stroke,
                 )
+            }
+            if (paceFraction != null && paceFraction > 0f && paceFraction < 1f) {
+                // Pace notch: a short bar across the ring at the "should be here by now" point,
+                // light with a dark edge so it reads on both the empty track and the filled arc.
+                val angle = Math.toRadians(-90.0 + 360.0 * paceFraction)
+                val center = Offset(this.size.width / 2f, this.size.height / 2f)
+                val radius = (this.size.width - stroke.width) / 2f
+                val half = stroke.width * 1.05f
+                val dir = Offset(kotlin.math.cos(angle).toFloat(), kotlin.math.sin(angle).toFloat())
+                val from = center + dir * (radius - half)
+                val to = center + dir * (radius + half)
+                drawLine(color = colors.surfaceSolid, start = from, end = to, strokeWidth = 7.dp.toPx(), cap = StrokeCap.Round)
+                drawLine(color = colors.ink, start = from, end = to, strokeWidth = 3.dp.toPx(), cap = StrokeCap.Round)
             }
         }
 

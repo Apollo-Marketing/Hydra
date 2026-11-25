@@ -246,6 +246,31 @@ object BottleMath {
         return latestVolumeMl(entries, bottleSizeMl)
     }
 
+    // ── Pace ──────────────────────────────────────────────────────────────────────────────
+
+    /** Pace starts counting at this local hour… */
+    const val PACE_START_HOUR = 7
+
+    /** …and expects the whole goal by this one, leaving the late evening free of catch-up drinking. */
+    const val PACE_END_HOUR = 21
+
+    /**
+     * Share of the daily goal (0..1) that should be drunk by [now] to be "on pace": an even
+     * spread between [PACE_START_HOUR] and [PACE_END_HOUR]. There is no evidence-based
+     * hour-by-hour schedule; the common guidance is simply to spread water through the
+     * waking day and ease off a few hours before bed, which is what this window does.
+     *
+     * [logicalDate] is the 3am-anchored day being shown: once the clock passes midnight the
+     * day's window is over, so the answer is 1 until the day rolls at 3am.
+     */
+    fun paceFraction(now: java.time.ZonedDateTime, logicalDate: LocalDate = logicalDateFor(now.toInstant(), now.zone)): Float {
+        if (now.toLocalDate().isAfter(logicalDate)) return 1f
+        val start = PACE_START_HOUR * 3600
+        val end = PACE_END_HOUR * 3600
+        val sec = now.toLocalTime().toSecondOfDay()
+        return ((sec - start).toFloat() / (end - start)).coerceIn(0f, 1f)
+    }
+
     data class RefillSummary(val count: Int, val totalMl: Double)
 
     /** Refills detected on the given **logical date**: count and summed mL added. */
