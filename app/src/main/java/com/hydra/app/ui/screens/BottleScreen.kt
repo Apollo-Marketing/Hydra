@@ -18,12 +18,15 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -62,6 +65,11 @@ import com.hydra.app.ui.theme.Violet
 import com.hydra.app.ui.theme.Warn
 import java.time.LocalDate
 import kotlin.math.roundToInt
+import kotlinx.coroutines.delay
+
+/** How long, and how often, to keep asking the cap for its state after a Clean/Wake tap. */
+private const val STATE_WATCH_MS = 120_000L
+private const val STATE_POLL_MS = 3_000L
 
 @Composable
 fun BottleScreen(connection: BottleConnection, modifier: Modifier = Modifier) {
@@ -107,6 +115,25 @@ fun BottleScreen(connection: BottleConnection, modifier: Modifier = Modifier) {
         if (connState == ConnectionState.Ready) {
             connection.readBatteryLevel()
             connection.readDeviceInfo()
+        }
+    }
+
+    // What the cap says it is doing (cleaning, power saving…). Asked for once the bottle is
+    // ready and idle, then polled for a while after a Clean/Wake tap so the buttons follow
+    // along. Never polled during a sync — the two would compete for the same BLE channel.
+    val bottleState by connection.uiState.collectAsState()
+    val ready = connState == ConnectionState.Ready
+    val cleaning = ready && bottleState?.isCleaning == true
+    var watchUntilMs by remember { mutableLongStateOf(0L) }
+    var confirmClean by rememberSaveable { mutableStateOf(false) }
+    val syncing = syncState is SyncState.Syncing
+    LaunchedEffect(connection, ready, syncing, watchUntilMs) {
+        if (!ready || syncing) return@LaunchedEffect
+        delay(600L)
+        connection.requestUiState()
+        while (System.currentTimeMillis() < watchUntilMs) {
+            delay(STATE_POLL_MS)
+            connection.requestUiState()
         }
     }
 
@@ -206,19 +233,33 @@ fun BottleScreen(connection: BottleConnection, modifier: Modifier = Modifier) {
                 modifier = Modifier.weight(1f),
             )
             ActionButton(
-                label = "Clean",
-                sub = "Coming soon",
+                label = if (cleaning) "Stop" else "Clean",
+                sub = if (cleaning) "Cleaning…" else "UV cycle",
                 icon = HydraIconName.Drop,
-                enabled = false,
-                onClick = {},
+                enabled = ready,
+                onClick = {
+                    if (cleaning) {
+                        connection.stopCleaning()
+                        watchUntilMs = System.currentTimeMillis() + STATE_WATCH_MS
+                    } else {
+                        confirmClean = true
+                    }
+                },
                 modifier = Modifier.weight(1f),
             )
             ActionButton(
                 label = "Wake",
-                sub = "Coming soon",
+                sub = when {
+                    !ready || bottleState == null -> "—"
+                    bottleState?.isPowerSaving == true -> "Power saving"
+                    else -> "Awake"
+                },
                 icon = HydraIconName.Plus,
-                enabled = false,
-                onClick = {},
+                enabled = ready,
+                onClick = {
+                    connection.wake()
+                    watchUntilMs = System.currentTimeMillis() + STATE_WATCH_MS
+                },
                 modifier = Modifier.weight(1f),
             )
         }
@@ -247,6 +288,27 @@ fun BottleScreen(connection: BottleConnection, modifier: Modifier = Modifier) {
         }
 
         Spacer(Modifier.height(80.dp))
+    }
+
+    if (confirmClean) {
+        AlertDialog(
+            onDismissRequest = { confirmClean = false },
+            containerColor = colors.surfaceSolid,
+            titleContentColor = colors.ink,
+            textContentColor = colors.inkSoft,
+            title = { Text("Start a UV clean?") },
+            text = { Text("Runs the bottle's standard UV cycle, the same as pressing the cap button. Keep the cap screwed on until it finishes.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmClean = false
+                    connection.startCleaning()
+                    watchUntilMs = System.currentTimeMillis() + STATE_WATCH_MS
+                }) { Text("Start", color = Cyan) }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmClean = false }) { Text("Cancel", color = colors.inkSoft) }
+            },
+        )
     }
 }
 

@@ -49,6 +49,8 @@ object BottleProtocol {
         const val GET_ACTIVATION_LOG    = "${TYPE_URL_PREFIX}RequestGetCapActivationLog"
         const val GET_CHARGING_ADC_LOG  = "${TYPE_URL_PREFIX}RequestGetChargingCapAdcLog"
         const val GET_ACTIVATION_ADC_LOG = "${TYPE_URL_PREFIX}RequestGetActivationCapAdcLog"
+        const val SET_UV_ACTIVATE       = "${TYPE_URL_PREFIX}RequestSetCapUvActivate"
+        const val SET_POWER_SAVING_MODE = "${TYPE_URL_PREFIX}RequestSetCapPowerSavingMode"
     }
 }
 
@@ -117,11 +119,24 @@ enum class UiStateEnum(val code: Int) {
     companion object { fun from(c: Int): UiStateEnum? = entries.firstOrNull { it.code == c } }
 }
 
+/** UV cycle selector for RequestSetCapUvActivate (CapEnumUvActivationMode). */
+enum class UvActivationMode(val code: Int) { MAINTENANCE(0), STANDARD(1), ADVENTURE(2), STOP(3) }
+
+/** CapPowerSavingMode wire values. Note ON is 0, so a missing field means "on". */
+const val POWER_SAVING_MODE_ON = 0
+const val POWER_SAVING_MODE_OFF = 1
+
 data class UiStateInfo(
     val state: UiStateEnum?,
     val stateRaw: Int,
     val powerSavingMode: Int,
 ) {
+    /** True while a UV cleaning cycle is running. */
+    val isCleaning: Boolean
+        get() = state == UiStateEnum.UV_MAINTENANCE || state == UiStateEnum.UV_NORMAL || state == UiStateEnum.UV_ADVENTURE
+
+    val isPowerSaving: Boolean get() = powerSavingMode == POWER_SAVING_MODE_ON
+
     fun format(): String = buildString {
         append(state?.name ?: "state=$stateRaw")
         append(", powerSave=$powerSavingMode")
@@ -480,6 +495,16 @@ object RequestPayloads {
         Wire.writeLengthDelimited(out, tag = 0x0a, bytes = sub.toByteArray())
         return out.toByteArray()
     }
+
+    /** A message whose only content is `field 1 varint = value` (zero is omitted, per proto3). */
+    private fun singleEnum(value: Int): ByteArray =
+        if (value == 0) EMPTY else byteArrayOf(0x08, value.toByte())
+
+    /** RequestSetCapUvActivate { mode = field 1 } — start a UV cycle, or stop the running one. */
+    fun uvActivate(mode: UvActivationMode): ByteArray = singleEnum(mode.code)
+
+    /** RequestSetCapPowerSavingMode { mode = field 1 } — the official app only ever sends OFF. */
+    fun powerSavingOff(): ByteArray = singleEnum(POWER_SAVING_MODE_OFF)
 
     /**
      * RequestGetCapTofLog — fetch sip history.

@@ -148,6 +148,10 @@ class BottleConnection(
     val sipLog: Flow<List<SipEntity>> = repository.observeAll()
 
     /** Multi-page sync state for the UI's "syncing…" indicator. */
+    /** Latest "what is the cap doing" report; null until one arrives or after a disconnect. */
+    private val _uiState = MutableStateFlow<UiStateInfo?>(null)
+    val uiState: StateFlow<UiStateInfo?> = _uiState.asStateFlow()
+
     private val _syncState = MutableStateFlow<SyncState>(SyncState.Idle)
     val syncState: StateFlow<SyncState> = _syncState.asStateFlow()
 
@@ -211,6 +215,7 @@ class BottleConnection(
                 BluetoothProfile.STATE_DISCONNECTED -> {
                     Log.d(TAG, "  STATE_DISCONNECTED")
                     _state.value = ConnectionState.Disconnected
+                    _uiState.value = null
                     _services.value = emptyList()
                     _currentAddress.value = null
                     _subscribed.value = false
@@ -412,6 +417,7 @@ class BottleConnection(
             }
             "ResponseGetCapUiState" -> {
                 Responses.parseUiState(value)?.let {
+                    _uiState.value = it
                     _events.tryEmit(BottleEvent.SettingsReceived(now, seq, typeUrl, "UI state", it.format()))
                 } ?: emitUnparsed(now, seq, typeUrl, value)
             }
@@ -613,6 +619,21 @@ class BottleConnection(
     }
 
     /** Send a SetCapTime command with the current system time. */
+    /** Ask the cap what it is doing; the answer lands in [uiState]. */
+    fun requestUiState(): Int? = sendCommand(BottleProtocol.Requests.GET_UI_STATE)
+
+    /** Start a standard UV cleaning cycle — the same command as the official app's "Clean now". */
+    fun startCleaning(): Int? =
+        sendCommand(BottleProtocol.Requests.SET_UV_ACTIVATE, RequestPayloads.uvActivate(UvActivationMode.STANDARD))
+
+    /** Stop the UV cycle that is currently running. */
+    fun stopCleaning(): Int? =
+        sendCommand(BottleProtocol.Requests.SET_UV_ACTIVATE, RequestPayloads.uvActivate(UvActivationMode.STOP))
+
+    /** Take the cap out of power-saving mode, as the official app does whenever it finds it on. */
+    fun wake(): Int? =
+        sendCommand(BottleProtocol.Requests.SET_POWER_SAVING_MODE, RequestPayloads.powerSavingOff())
+
     fun requestSetTimeNow(): Int? =
         sendCommand(BottleProtocol.Requests.SET_TIME, RequestPayloads.setTime(System.currentTimeMillis()))
 
@@ -762,6 +783,7 @@ class BottleConnection(
         gatt?.disconnect()
         if (gatt == null && _state.value != ConnectionState.Disconnected) {
             _state.value = ConnectionState.Disconnected
+            _uiState.value = null
             _currentAddress.value = null
         }
     }
