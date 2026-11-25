@@ -79,7 +79,7 @@ app/src/main/java/com/hydra/app/
 - **Android runs one GATT operation at a time and refuses — does not queue — a read or write started while another is in flight.** Space commands out (the post-sync sequence in `MainScreen` uses ~500 ms gaps), never send during a sync, and use `BottleConnection.refreshBatteryAndInfo()` for standard reads (sequential, awaited, retried).
 - One `ResponseGetCapTofLog` notification carries up to 7 entries plus a padded tail of truncated headers; `parseTofLogEntries` / `parseActivationLog` stop quietly at the first cut-short entry.
 - A `RequestGetCapTofState` takes ~3 s to answer (the cap takes a fresh measurement); every other Get answers in well under 100 ms.
-- Quiet-hours (do-not-disturb) times are seconds since midnight **UTC**, with 86400 for midnight — convert with `BottleClock`. They shift by an hour across DST until re-sent.
+- Quiet-hours (do-not-disturb) times are seconds since midnight **UTC**, with 86400 for midnight — convert with `BottleClock`. Quiet hours always equal the sleep hours from Settings → Your day (bedtime → wake-up); `MainScreen` rewrites them whenever the bottle's window is on but doesn't match, which also corrects DST shifts.
 - The logical day rolls over at `BottleMath.dayResetSec`, a process-wide value `MainScreen` sets from the user's wake-up/bedtime (`DaySchedule`, Settings → Your day): the middle of the night's sleep, rounded down to the hour (default 3 am). Pace on the Today ring runs from wake-up to two hours before bedtime.
 - Intake everywhere comes from `BottleMath.levelEvents`: a drink counts once the level is >25 mL below the level at the last drink/refill; a rise >200 mL is a refill; readings at or beyond the TOF max (270 mm for 1000 mL) are ignored.
 

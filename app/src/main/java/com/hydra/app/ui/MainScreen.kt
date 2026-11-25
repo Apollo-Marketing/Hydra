@@ -1,5 +1,7 @@
 package com.hydra.app.ui
 
+import com.hydra.app.ble.DoNotDisturbState
+import com.hydra.app.ble.BottleClock
 import com.hydra.app.ble.BottleMath
 import androidx.compose.runtime.key
 import android.content.Intent
@@ -108,6 +110,13 @@ fun MainScreen() {
             }
     }
 
+    // The user's wake/bed times decide when a day rolls over. Set before any tab draws, and
+    // rebuild the tabs when it changes so every "today" and daily total is re-bucketed.
+    val wakeSec by prefs.wakeSec.collectAsState(initial = AppPreferencesRepository.DEFAULT_WAKE_SEC)
+    val bedSec by prefs.bedSec.collectAsState(initial = AppPreferencesRepository.DEFAULT_BED_SEC)
+    val dayResetSec = BottleMath.DaySchedule(wakeSec, bedSec).resetSec
+    BottleMath.dayResetSec = dayResetSec
+
     // Power saving: like the official app, switch it off whenever the cap reports it on.
     // The state is asked for once the bottle is connected and its sync has finished (the two
     // would otherwise compete for the BLE channel); at most one wake is sent per connection.
@@ -129,6 +138,25 @@ fun MainScreen() {
         connection.wake()
         delay(600L)
         connection.requestUiState()
+    }
+
+    // Quiet hours follow the sleep hours from Settings → Your day. Whenever the bottle's
+    // do-not-disturb window is on but doesn't match bedtime → wake-up (the schedule changed,
+    // or the clocks moved for daylight saving — the bottle stores UTC), write the right times.
+    // A write is followed by one read-back; an unchanged answer does not trigger another write.
+    val bottleQuietHours by connection.quietHours.collectAsState()
+    LaunchedEffect(connection, bottleQuietHours, wakeSec, bedSec, connState, syncing) {
+        val current = bottleQuietHours ?: return@LaunchedEffect
+        if (connState != ConnectionState.Ready || syncing) return@LaunchedEffect
+        if (current.stateRaw == DoNotDisturbState.OFF.code) return@LaunchedEffect
+        val offsetSec = java.time.ZoneId.systemDefault().rules.getOffset(java.time.Instant.now()).totalSeconds
+        val start = BottleClock.localToBottleSec(bedSec, offsetSec)
+        val stop = BottleClock.localToBottleSec(wakeSec, offsetSec)
+        if (current.startTimeInSec == start && current.stopTimeInSec == stop) return@LaunchedEffect
+        delay(1500L)  // let the rest of the post-sync requests finish first
+        connection.setQuietHours(current.copy(startTimeInSec = start, stopTimeInSec = stop))
+        delay(500L)
+        connection.requestQuietHours()
     }
 
     // Filter replacement reminder: re-evaluate whenever the filter, the sip history, or the
@@ -153,13 +181,6 @@ fun MainScreen() {
             GlassNavItem(label = "Settings", icon = HydraIconName.Gear),
         )
     }
-
-    // The user's wake/bed times decide when a day rolls over. Set before any tab draws, and
-    // rebuild the tabs when it changes so every "today" and daily total is re-bucketed.
-    val wakeSec by prefs.wakeSec.collectAsState(initial = AppPreferencesRepository.DEFAULT_WAKE_SEC)
-    val bedSec by prefs.bedSec.collectAsState(initial = AppPreferencesRepository.DEFAULT_BED_SEC)
-    val dayResetSec = BottleMath.DaySchedule(wakeSec, bedSec).resetSec
-    BottleMath.dayResetSec = dayResetSec
 
     GradientBackground {
         Box(modifier = Modifier.fillMaxSize()) {

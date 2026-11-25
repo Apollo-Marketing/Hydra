@@ -212,7 +212,7 @@ fun SettingsScreen(connection: BottleConnection, modifier: Modifier = Modifier) 
 
         YourDayGroup(prefs)
 
-        QuietHoursGroup(connection)
+        QuietHoursGroup(connection, prefs)
 
         SettingsGroup(title = "Display") {
             SettingsRow(
@@ -520,79 +520,52 @@ private fun YourDayGroup(prefs: AppPreferencesRepository) {
 }
 
 /**
- * Quiet hours live on the bottle, not in the app: this reads the bottle's do-not-disturb
- * settings and writes changes straight back, then re-reads them so the rows only ever show
- * what the bottle actually holds. Times are stored on the bottle in UTC.
+ * Quiet hours live on the bottle (its do-not-disturb setting) and always cover the sleep
+ * hours from "Your day": bedtime → wake-up. The only control here is on/off; `MainScreen`
+ * keeps the bottle's times in step with the schedule whenever it is connected.
  */
 @Composable
-private fun QuietHoursGroup(connection: BottleConnection) {
+private fun QuietHoursGroup(connection: BottleConnection, prefs: AppPreferencesRepository) {
     val scope = rememberCoroutineScope()
     val connState by connection.state.collectAsState()
     val settings by connection.quietHours.collectAsState()
+    val wakeSec by prefs.wakeSec.collectAsState(initial = AppPreferencesRepository.DEFAULT_WAKE_SEC)
+    val bedSec by prefs.bedSec.collectAsState(initial = AppPreferencesRepository.DEFAULT_BED_SEC)
     val ready = connState == ConnectionState.Ready
-    var picking by rememberSaveable { mutableStateOf<String?>(null) }
-
-    val offsetSec = ZoneId.systemDefault().rules.getOffset(Instant.now()).totalSeconds
     val current = settings
     val on = current != null && current.stateRaw != DoNotDisturbState.OFF.code
-    val startLocal = current?.let { BottleClock.bottleToLocalSec(it.startTimeInSec, offsetSec) }
-    val stopLocal = current?.let { BottleClock.bottleToLocalSec(it.stopTimeInSec, offsetSec) }
-
-    fun write(updated: DoNotDisturbSettings) {
-        scope.launch {
-            connection.setQuietHours(updated)
-            delay(500L)
-            connection.requestQuietHours()
-        }
-    }
-    fun label(secOfDay: Int?): String = secOfDay?.let {
-        LocalTime.ofSecondOfDay(it.toLong()).format(DateTimeFormatter.ofPattern("h:mm a", Locale.getDefault())).lowercase()
-    } ?: "—"
+    val fmt = DateTimeFormatter.ofPattern("h:mm a", Locale.getDefault())
+    fun label(sec: Int) = LocalTime.ofSecondOfDay(sec.toLong()).format(fmt).lowercase()
 
     SettingsGroup(title = "Quiet hours") {
         SettingsRow(
-            label = "Quiet hours",
+            label = "Quiet while you sleep",
             value = when {
                 !ready -> "Connect your bottle to view or change"
                 current == null -> "Reading from bottle…"
-                on -> "Bottle stays quiet between these times"
+                on -> "Bottle stays quiet from ${label(bedSec)} to ${label(wakeSec)}"
                 else -> "Off"
             },
             end = if (on) RowEnd.ToggleOn else RowEnd.ToggleOff,
+            last = true,
             onClick = {
                 if (ready && current != null) {
                     val state = if (on) DoNotDisturbState.OFF else DoNotDisturbState.AUTO
-                    write(current.copy(state = state, stateRaw = state.code))
+                    val offsetSec = ZoneId.systemDefault().rules.getOffset(Instant.now()).totalSeconds
+                    scope.launch {
+                        connection.setQuietHours(
+                            current.copy(
+                                state = state,
+                                stateRaw = state.code,
+                                startTimeInSec = BottleClock.localToBottleSec(bedSec, offsetSec),
+                                stopTimeInSec = BottleClock.localToBottleSec(wakeSec, offsetSec),
+                            ),
+                        )
+                        delay(500L)
+                        connection.requestQuietHours()
+                    }
                 }
             },
-        )
-        SettingsRow(
-            label = "From",
-            value = label(startLocal),
-            end = RowEnd.Arrow,
-            onClick = { if (ready && current != null) picking = "start" },
-        )
-        SettingsRow(
-            label = "Until",
-            value = label(stopLocal),
-            end = RowEnd.Arrow,
-            last = true,
-            onClick = { if (ready && current != null) picking = "stop" },
-        )
-    }
-
-    val which = picking
-    if (which != null && current != null) {
-        val initial = (if (which == "start") startLocal else stopLocal) ?: 0
-        SipTimePickerDialog(
-            initialHour = initial / 3600,
-            initialMinute = (initial % 3600) / 60,
-            onConfirm = { h, m ->
-                val bottleSec = BottleClock.localToBottleSec(h * 3600 + m * 60, offsetSec)
-                write(if (which == "start") current.copy(startTimeInSec = bottleSec) else current.copy(stopTimeInSec = bottleSec))
-                picking = null
-            },
-            onDismiss = { picking = null },
         )
     }
 }
