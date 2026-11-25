@@ -252,7 +252,7 @@ private fun Stepper(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun SipTimePickerDialog(
+internal fun SipTimePickerDialog(
     initialHour: Int,
     initialMinute: Int,
     onConfirm: (hour: Int, minute: Int) -> Unit,

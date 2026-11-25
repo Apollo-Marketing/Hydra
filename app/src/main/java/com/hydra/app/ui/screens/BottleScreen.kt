@@ -131,6 +131,11 @@ fun BottleScreen(connection: BottleConnection, modifier: Modifier = Modifier) {
         if (!ready || syncing) return@LaunchedEffect
         delay(600L)
         connection.requestUiState()
+        if (watchUntilMs > 0L) {
+            // A clean was just started or stopped here — pick up its log entry.
+            delay(400L)
+            connection.requestCleanLog()
+        }
         while (System.currentTimeMillis() < watchUntilMs) {
             delay(STATE_POLL_MS)
             connection.requestUiState()
@@ -139,7 +144,13 @@ fun BottleScreen(connection: BottleConnection, modifier: Modifier = Modifier) {
 
     val bottleSize = BottleConfig.BOTTLE_SIZE_ML
     val today = BottleMath.currentLogicalDate()
-    val volume = remember(sips) { BottleMath.latestVolumeMl(sips, bottleSize) }
+    val liveLevel by connection.liveLevel.collectAsState()
+    val volume = remember(sips, liveLevel) {
+        BottleMath.currentVolumeMl(sips, bottleSize, liveLevel?.distanceMm, liveLevel?.atMs)
+    }
+    val levelCheckedAgo = rememberRelativeTime(epochMs = liveLevel?.atMs ?: 0L, neverLabel = "Level")
+    val lastCleanedSec by connection.lastCleanedSec.collectAsState()
+    val cleanedAgo = rememberRelativeTime(epochMs = (lastCleanedSec ?: 0L) * 1000L, neverLabel = "—")
     val refills = remember(sips) { BottleMath.refillsOnDate(sips, bottleSize, today) }
     val ml = volume?.roundToInt() ?: 0
     val frac = volume?.let { (it / bottleSize).toFloat().coerceIn(0f, 1f) } ?: 0f
@@ -247,6 +258,14 @@ fun BottleScreen(connection: BottleConnection, modifier: Modifier = Modifier) {
                 },
                 modifier = Modifier.weight(1f),
             )
+            ActionButton(
+                label = "Refresh",
+                sub = levelCheckedAgo,
+                icon = HydraIconName.Bottle,
+                enabled = ready && !syncing,
+                onClick = { connection.requestLevel() },
+                modifier = Modifier.weight(1f),
+            )
         }
 
         GlassCard(
@@ -261,6 +280,7 @@ fun BottleScreen(connection: BottleConnection, modifier: Modifier = Modifier) {
                     fontWeight = FontWeight.Medium,
                     modifier = Modifier.padding(bottom = 6.dp),
                 )
+                AboutRow("Last cleaned", cleanedAgo)
                 AboutRow("Model", deviceInfo.model.ifBlank { "—" })
                 AboutRow("Serial", deviceInfo.serial.ifBlank { "—" })
                 AboutRow("Firmware", deviceInfo.firmware.ifBlank { "—" })

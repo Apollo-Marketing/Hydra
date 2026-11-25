@@ -234,6 +234,18 @@ object BottleMath {
         return volumeMl(latest.distanceMm, bottleSizeMl)
     }
 
+    /**
+     * What's in the bottle right now: the on-request reading if it is newer than the last
+     * synced one, otherwise [latestVolumeMl].
+     */
+    fun currentVolumeMl(entries: List<SipEntity>, bottleSizeMl: Int, liveDistanceMm: Int?, liveAtMs: Long?): Double? {
+        val latestSec = entries.asSequence().filter { it.manualVolumeMl == null }.maxOfOrNull { it.timestampSec } ?: 0L
+        if (liveDistanceMm != null && liveAtMs != null && liveAtMs / 1000L >= latestSec) {
+            volumeMl(liveDistanceMm, bottleSizeMl)?.let { return it }
+        }
+        return latestVolumeMl(entries, bottleSizeMl)
+    }
+
     data class RefillSummary(val count: Int, val totalMl: Double)
 
     /** Refills detected on the given **logical date**: count and summed mL added. */

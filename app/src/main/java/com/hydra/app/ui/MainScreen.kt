@@ -114,6 +114,10 @@ fun MainScreen() {
         if (connState != ConnectionState.Ready || syncing) return@LaunchedEffect
         delay(800L)
         connection.requestUiState()
+        delay(500L)
+        connection.requestCleanLog()
+        delay(500L)
+        connection.requestQuietHours()
     }
     LaunchedEffect(connection, connState) {
         if (connState != ConnectionState.Ready) return@LaunchedEffect
@@ -170,7 +174,7 @@ fun MainScreen() {
                         )
                         TAB_BOTTLE -> BottleScreen(connection = connection)
                         TAB_HISTORY -> HistoryScreen()
-                        TAB_SETTINGS -> SettingsScreen()
+                        TAB_SETTINGS -> SettingsScreen(connection = connection)
                     }
                 }
             }

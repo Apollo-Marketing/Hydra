@@ -49,6 +49,8 @@ object BottleProtocol {
         const val GET_ACTIVATION_LOG    = "${TYPE_URL_PREFIX}RequestGetCapActivationLog"
         const val GET_CHARGING_ADC_LOG  = "${TYPE_URL_PREFIX}RequestGetChargingCapAdcLog"
         const val GET_ACTIVATION_ADC_LOG = "${TYPE_URL_PREFIX}RequestGetActivationCapAdcLog"
+        const val GET_TOF_STATE         = "${TYPE_URL_PREFIX}RequestGetCapTofState"
+        const val SET_DND               = "${TYPE_URL_PREFIX}RequestSetCapDoNotDisturbSettings"
         const val SET_UV_ACTIVATE       = "${TYPE_URL_PREFIX}RequestSetCapUvActivate"
         const val SET_POWER_SAVING_MODE = "${TYPE_URL_PREFIX}RequestSetCapPowerSavingMode"
     }
@@ -173,6 +175,28 @@ data class DoNotDisturbSettings(
         append(formatHMRange(startTimeInSec, stopTimeInSec))
         append(", snooze ${snoozeTimeInMinutes}min")
     }
+}
+
+/** A level reading taken on request (CapTofState) rather than read back from the sip log. */
+data class TofState(val distanceMm: Int, val kcps: Int)
+
+/** One UV cycle from the bottle's activation log. [mode] follows [UvActivationMode] codes. */
+data class UvActivation(val timestampSec: Long, val mode: Int, val batteryPercent: Int)
+
+/**
+ * The bottle has no time zone: quiet-hours times are seconds since midnight **UTC**, and it
+ * uses 86400 rather than 0 for midnight (mirrors the official app's `k9.b.a`).
+ */
+object BottleClock {
+    private const val DAY = 86_400
+
+    fun localToBottleSec(localSecOfDay: Int, utcOffsetSec: Int): Int {
+        val utc = Math.floorMod(localSecOfDay - utcOffsetSec, DAY)
+        return if (utc == 0) DAY else utc
+    }
+
+    fun bottleToLocalSec(bottleSec: Int, utcOffsetSec: Int): Int =
+        Math.floorMod(bottleSec + utcOffsetSec, DAY)
 }
 
 data class LowBatterySettings(
@@ -500,6 +524,29 @@ object RequestPayloads {
     private fun singleEnum(value: Int): ByteArray =
         if (value == 0) EMPTY else byteArrayOf(0x08, value.toByte())
 
+    /**
+     * RequestSetCapDoNotDisturbSettings { settings = field 1 }. Writes back every field of
+     * [settings] so nothing the bottle already had (e.g. snooze) is lost.
+     */
+    fun setDoNotDisturb(settings: DoNotDisturbSettings): ByteArray {
+        val sub = ByteArrayOutputStream()
+        if (settings.stateRaw != 0) {
+            sub.write(0x08) // field 1, varint = state
+            Wire.writeVarint(sub, settings.stateRaw)
+        }
+        sub.write(0x15) // field 2, fixed32 = startTimeInSec
+        Wire.writeFixed32(sub, settings.startTimeInSec)
+        sub.write(0x1d) // field 3, fixed32 = stopTimeInSec
+        Wire.writeFixed32(sub, settings.stopTimeInSec)
+        if (settings.snoozeTimeInMinutes != 0) {
+            sub.write(0x25) // field 4, fixed32 = snoozeTimeInMinutes
+            Wire.writeFixed32(sub, settings.snoozeTimeInMinutes)
+        }
+        val out = ByteArrayOutputStream()
+        Wire.writeLengthDelimited(out, tag = 0x0a, bytes = sub.toByteArray())
+        return out.toByteArray()
+    }
+
     /** RequestSetCapUvActivate { mode = field 1 } — start a UV cycle, or stop the running one. */
     fun uvActivate(mode: UvActivationMode): ByteArray = singleEnum(mode.code)
 
@@ -642,6 +689,53 @@ object Responses {
         }
         HydroReminderSettings(HydroReminderState.from(stateRaw), stateRaw, start, stop, interval, color)
     }.getOrNull()
+
+    /** ResponseGetCapTofState { state = field 1 { distance fixed32 = 1, kcps fixed32 = 2 } }. */
+    fun parseTofState(bytes: ByteArray): TofState? = runCatching {
+        var distance = 0
+        var kcps = 0
+        for (f in Wire.walkFields(unwrapField1(bytes))) {
+            when (f.number) {
+                1 -> if (f.wireType == 5) distance = (f.value as Long).toInt()
+                2 -> if (f.wireType == 5) kcps = (f.value as Long).toInt()
+            }
+        }
+        if (distance <= 0) null else TofState(distance, kcps)
+    }.getOrNull()
+
+    /**
+     * ResponseGetCapActivationLog — repeated field-1 entries
+     * { timestamp varint = 1, mode varint = 2, batterySoc fixed32 = 3 }. Like the sip log,
+     * a full notification ends in truncated entry headers, so parsing stops at the first
+     * entry that is cut short. Never throws.
+     */
+    fun parseActivationLog(valueBytes: ByteArray): List<UvActivation> {
+        val out = mutableListOf<UvActivation>()
+        runCatching {
+            var pos = 0
+            while (pos < valueBytes.size) {
+                if (valueBytes[pos] != 0x0a.toByte()) break
+                val (innerLen, lenConsumed) = Wire.readVarint(valueBytes, pos + 1)
+                val innerStart = pos + 1 + lenConsumed
+                if (innerLen !in 1..(valueBytes.size - innerStart).toLong()) break
+                val end = innerStart + innerLen.toInt()
+                var ts = 0L
+                var mode = 0
+                var battery = 0
+                for (f in Wire.walkFields(valueBytes.copyOfRange(innerStart, end))) {
+                    when (f.number) {
+                        1 -> if (f.wireType == 0) ts = f.value as Long
+                        2 -> if (f.wireType == 0) mode = (f.value as Long).toInt()
+                        3 -> if (f.wireType == 5) battery = (f.value as Long).toInt()
+                    }
+                }
+                if (ts <= 0L) break
+                out += UvActivation(ts, mode, battery)
+                pos = end
+            }
+        }
+        return out
+    }
 
     fun parseDoNotDisturbSettings(bytes: ByteArray): DoNotDisturbSettings? = runCatching {
         var stateRaw = 0

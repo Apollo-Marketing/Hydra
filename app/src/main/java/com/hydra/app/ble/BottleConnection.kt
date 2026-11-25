@@ -94,6 +94,9 @@ data class IncomingPacket(val timestamp: Long, val bytes: ByteArray) {
 
 data class ScannedDevice(val name: String, val address: String, val rssi: Int)
 
+/** A water-level reading taken on request, and when the phone received it. */
+data class LiveLevel(val distanceMm: Int, val atMs: Long)
+
 private fun ByteArray.hex(): String =
     joinToString(" ") { "%02x".format(it.toInt() and 0xFF) }
 
@@ -151,6 +154,18 @@ class BottleConnection(
     /** Latest "what is the cap doing" report; null until one arrives or after a disconnect. */
     private val _uiState = MutableStateFlow<UiStateInfo?>(null)
     val uiState: StateFlow<UiStateInfo?> = _uiState.asStateFlow()
+
+    /** Most recent on-request level reading (see [requestLevel]). */
+    private val _liveLevel = MutableStateFlow<LiveLevel?>(null)
+    val liveLevel: StateFlow<LiveLevel?> = _liveLevel.asStateFlow()
+
+    /** When the bottle last ran a UV cycle (epoch seconds), from its activation log. */
+    private val _lastCleanedSec = MutableStateFlow<Long?>(null)
+    val lastCleanedSec: StateFlow<Long?> = _lastCleanedSec.asStateFlow()
+
+    /** The bottle's quiet-hours (do not disturb) settings; null until read this connection. */
+    private val _quietHours = MutableStateFlow<DoNotDisturbSettings?>(null)
+    val quietHours: StateFlow<DoNotDisturbSettings?> = _quietHours.asStateFlow()
 
     private val _syncState = MutableStateFlow<SyncState>(SyncState.Idle)
     val syncState: StateFlow<SyncState> = _syncState.asStateFlow()
@@ -216,6 +231,7 @@ class BottleConnection(
                     Log.d(TAG, "  STATE_DISCONNECTED")
                     _state.value = ConnectionState.Disconnected
                     _uiState.value = null
+            _quietHours.value = null
                     _services.value = emptyList()
                     _currentAddress.value = null
                     _subscribed.value = false
@@ -397,6 +413,7 @@ class BottleConnection(
             }
             "ResponseGetCapDoNotDisturbSettings" -> {
                 Responses.parseDoNotDisturbSettings(value)?.let {
+                    _quietHours.value = it
                     _events.tryEmit(BottleEvent.SettingsReceived(now, seq, typeUrl, "DND", it.format()))
                 } ?: emitUnparsed(now, seq, typeUrl, value)
             }
@@ -414,6 +431,15 @@ class BottleConnection(
                 Responses.parseUvConfig(value)?.let {
                     _events.tryEmit(BottleEvent.SettingsReceived(now, seq, typeUrl, "UV", it.format()))
                 } ?: emitUnparsed(now, seq, typeUrl, value)
+            }
+            "ResponseGetCapTofState" -> {
+                Responses.parseTofState(value)?.let {
+                    _liveLevel.value = LiveLevel(it.distanceMm, now)
+                } ?: emitUnparsed(now, seq, typeUrl, value)
+            }
+            "ResponseGetCapActivationLog" -> {
+                val newest = Responses.parseActivationLog(value).maxOfOrNull { it.timestampSec }
+                if (newest != null && newest > (_lastCleanedSec.value ?: 0L)) _lastCleanedSec.value = newest
             }
             "ResponseGetCapUiState" -> {
                 Responses.parseUiState(value)?.let {
@@ -619,6 +645,22 @@ class BottleConnection(
     }
 
     /** Send a SetCapTime command with the current system time. */
+    /** Ask for the current water-level reading; the answer lands in [liveLevel]. */
+    fun requestLevel(): Int? = sendCommand(BottleProtocol.Requests.GET_TOF_STATE)
+
+    /** Ask for the last day of UV cycles; the newest one lands in [lastCleanedSec]. */
+    fun requestCleanLog(): Int? = sendCommand(
+        BottleProtocol.Requests.GET_ACTIVATION_LOG,
+        RequestPayloads.getTofLog(sinceSec = System.currentTimeMillis() / 1000L - 86_400L, maxCount = 40),
+    )
+
+    /** Ask for the quiet-hours settings; the answer lands in [quietHours]. */
+    fun requestQuietHours(): Int? = sendCommand(BottleProtocol.Requests.GET_DND)
+
+    /** Write quiet-hours settings to the bottle. Read them back afterwards to confirm. */
+    fun setQuietHours(settings: DoNotDisturbSettings): Int? =
+        sendCommand(BottleProtocol.Requests.SET_DND, RequestPayloads.setDoNotDisturb(settings))
+
     /** Ask the cap what it is doing; the answer lands in [uiState]. */
     fun requestUiState(): Int? = sendCommand(BottleProtocol.Requests.GET_UI_STATE)
 
@@ -784,6 +826,7 @@ class BottleConnection(
         if (gatt == null && _state.value != ConnectionState.Disconnected) {
             _state.value = ConnectionState.Disconnected
             _uiState.value = null
+            _quietHours.value = null
             _currentAddress.value = null
         }
     }

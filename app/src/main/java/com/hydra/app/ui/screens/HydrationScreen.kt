@@ -104,7 +104,10 @@ fun HydrationScreen(
     }
     val bottleSize = BottleConfig.BOTTLE_SIZE_ML
     val todayMl = remember(sips, today) { BottleMath.intakeOnDateMl(sips, bottleSize, today) }
-    val currentVolumeMl = remember(sips) { BottleMath.latestVolumeMl(sips, bottleSize) }
+    val liveLevel by connection.liveLevel.collectAsState()
+    val currentVolumeMl = remember(sips, liveLevel) {
+        BottleMath.currentVolumeMl(sips, bottleSize, liveLevel?.distanceMm, liveLevel?.atMs)
+    }
     val hourly = remember(sips, today) { BottleMath.hourlyIntakeMl(sips, bottleSize, today) }
     val streak = remember(sips, dailyGoal, today) { BottleMath.streakDays(sips, bottleSize, dailyGoal) }
 
