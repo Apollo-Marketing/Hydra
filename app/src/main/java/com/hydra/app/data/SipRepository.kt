@@ -11,8 +11,11 @@ class SipRepository(private val dao: SipDao) {
 
     fun observeAll(): Flow<List<SipEntity>> = dao.observeAll()
 
-    /** Most recent stored timestamp in seconds, or 0 if the DB is empty. */
-    suspend fun lastTimestamp(): Long = dao.maxTimestamp() ?: 0L
+    /**
+     * Most recent bottle-synced timestamp in seconds, or 0 if no bottle sips are stored.
+     * Used as the sync cursor — manual sips never count (see [SipDao.maxBleTimestamp]).
+     */
+    suspend fun lastTimestamp(): Long = dao.maxBleTimestamp() ?: 0L
 
     suspend fun upsertAll(entries: List<SipEntry>) {
         if (entries.isEmpty()) return

@@ -18,8 +18,14 @@ interface SipDao {
     @Query("SELECT * FROM sip_log ORDER BY timestampSec DESC")
     fun observeAll(): Flow<List<SipEntity>>
 
-    @Query("SELECT MAX(timestampSec) FROM sip_log")
-    suspend fun maxTimestamp(): Long?
+    /**
+     * Newest timestamp among rows that came from the bottle. Manual sips are excluded on
+     * purpose: this value is the sync cursor ("give me everything newer than this"), and a
+     * manual sip logged before a sync would otherwise push the cursor past bottle sips that
+     * haven't been fetched yet, skipping them permanently.
+     */
+    @Query("SELECT MAX(timestampSec) FROM sip_log WHERE manualVolumeMl IS NULL")
+    suspend fun maxBleTimestamp(): Long?
 
     @Query("DELETE FROM sip_log")
     suspend fun deleteAll()
