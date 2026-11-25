@@ -23,6 +23,7 @@ import com.hydra.app.ble.BottleConfig
 import com.hydra.app.ble.BottleConnection
 import com.hydra.app.ble.BottleEvent
 import com.hydra.app.ble.ConnectionState
+import com.hydra.app.ble.SyncState
 import com.hydra.app.data.AppPreferencesRepository
 import com.hydra.app.data.FilterRepository
 import com.hydra.app.data.HydraDatabase
@@ -44,6 +45,7 @@ import com.hydra.app.update.UpdateController
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 
 private const val TAB_HYDRATION = 0
 private const val TAB_BOTTLE = 1
@@ -102,6 +104,23 @@ fun MainScreen() {
             .collect { entries ->
                 healthConnect.onSipsChanged(entries, BottleConfig.BOTTLE_SIZE_ML)
             }
+    }
+
+    // Power saving: like the official app, switch it off whenever the cap reports it on.
+    // The state is asked for once the bottle is connected and its sync has finished (the two
+    // would otherwise compete for the BLE channel); at most one wake is sent per connection.
+    val syncing = connection.syncState.collectAsState().value is SyncState.Syncing
+    LaunchedEffect(connection, connState, syncing) {
+        if (connState != ConnectionState.Ready || syncing) return@LaunchedEffect
+        delay(800L)
+        connection.requestUiState()
+    }
+    LaunchedEffect(connection, connState) {
+        if (connState != ConnectionState.Ready) return@LaunchedEffect
+        connection.uiState.first { it?.isPowerSaving == true }
+        connection.wake()
+        delay(600L)
+        connection.requestUiState()
     }
 
     // Filter replacement reminder: re-evaluate whenever the filter, the sip history, or the

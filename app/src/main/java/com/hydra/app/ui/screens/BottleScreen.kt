@@ -67,7 +67,7 @@ import java.time.LocalDate
 import kotlin.math.roundToInt
 import kotlinx.coroutines.delay
 
-/** How long, and how often, to keep asking the cap for its state after a Clean/Wake tap. */
+/** How long, and how often, to keep asking the cap for its state after a Clean tap. */
 private const val STATE_WATCH_MS = 120_000L
 private const val STATE_POLL_MS = 3_000L
 
@@ -119,7 +119,7 @@ fun BottleScreen(connection: BottleConnection, modifier: Modifier = Modifier) {
     }
 
     // What the cap says it is doing (cleaning, power saving…). Asked for once the bottle is
-    // ready and idle, then polled for a while after a Clean/Wake tap so the buttons follow
+    // ready and idle, then polled for a while after a Clean tap so the buttons follow
     // along. Never polled during a sync — the two would compete for the same BLE channel.
     val bottleState by connection.uiState.collectAsState()
     val ready = connState == ConnectionState.Ready
@@ -244,21 +244,6 @@ fun BottleScreen(connection: BottleConnection, modifier: Modifier = Modifier) {
                     } else {
                         confirmClean = true
                     }
-                },
-                modifier = Modifier.weight(1f),
-            )
-            ActionButton(
-                label = "Wake",
-                sub = when {
-                    !ready || bottleState == null -> "—"
-                    bottleState?.isPowerSaving == true -> "Power saving"
-                    else -> "Awake"
-                },
-                icon = HydraIconName.Plus,
-                enabled = ready,
-                onClick = {
-                    connection.wake()
-                    watchUntilMs = System.currentTimeMillis() + STATE_WATCH_MS
                 },
                 modifier = Modifier.weight(1f),
             )
