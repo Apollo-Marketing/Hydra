@@ -8,6 +8,7 @@ import android.util.Log
 import androidx.core.content.ContextCompat
 import androidx.work.CoroutineWorker
 import androidx.work.ExistingPeriodicWorkPolicy
+import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
@@ -57,6 +58,19 @@ object BackgroundSync {
         val request = PeriodicWorkRequestBuilder<BottleSyncWorker>(INTERVAL_MINUTES, TimeUnit.MINUTES).build()
         // KEEP: re-applying on every app start must not reset the hourly timer.
         wm.enqueueUniquePeriodicWork(WORK_NAME, ExistingPeriodicWorkPolicy.KEEP, request)
+    }
+
+    /**
+     * Dev aid: run a single check-in after [delaySeconds], without waiting for the hourly
+     * slot (Android will not run periodic work early on request). Launch a debug build with
+     * `adb shell am start -n com.hydra.app.dev/com.hydra.app.MainActivity --ez bgsync_test true`,
+     * leave the app, and watch `adb logcat -s HydraBgSync`.
+     */
+    fun runOnceForTesting(context: Context, delaySeconds: Long = 45L) {
+        val request = OneTimeWorkRequestBuilder<BottleSyncWorker>()
+            .setInitialDelay(delaySeconds, TimeUnit.SECONDS)
+            .build()
+        WorkManager.getInstance(context.applicationContext).enqueue(request)
     }
 }
 

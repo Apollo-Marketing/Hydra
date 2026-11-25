@@ -1,5 +1,6 @@
 package com.hydra.app
 
+import com.hydra.app.sync.BackgroundSync
 import com.hydra.app.sync.AppForeground
 import android.content.Intent
 import android.os.Bundle
@@ -43,6 +44,9 @@ class MainActivity : ComponentActivity() {
         val prefs = AppPreferencesRepository.get(this)
         val updates = UpdateController.get(this)
         val launchedForHealthConnectRationale = intent.isHealthConnectRationale()
+        if (BuildConfig.DEBUG && intent?.getBooleanExtra("bgsync_test", false) == true) {
+            BackgroundSync.runOnceForTesting(this)
+        }
         setContent {
             val mode by prefs.themeMode.collectAsState(initial = ThemeMode.System)
             val dark = when (mode) {
