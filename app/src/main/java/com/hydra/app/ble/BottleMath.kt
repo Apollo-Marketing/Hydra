@@ -15,11 +15,10 @@ import java.time.ZoneId
  *  1. [volumeMl] applies the bottle's bundled polynomial to a TofLog distance reading and
  *     returns water volume in mL. The polynomial coefficients are hardcoded factory
  *     constants per bottle size (see [POLY_1000], [POLY_680]).
- *  2. [intakeOnDateMl], [hourlyIntakeMl], [refillsOnDate], [latestVolumeMl], [streakDays],
- *     and [lastNDayIntakes] aggregate a list of [SipEntity] rows into day/hour/streak
- *     summaries. They use [volumeMl] under the hood for BLE-synced rows; manual sips
- *     (`SipEntity.manualVolumeMl != null`) are treated separately because they have no
- *     real distance reading.
+ *  2. [levelEvents] turns the sip history into drinks, refills and manual sips using the
+ *     official app's detection rules; [dailyIntakeMl], [intakeOnDateMl], [hourlyIntakeMl],
+ *     [refillsOnDate], [perSipDrinks], [streakDays] and [lastNDayIntakes] are all summaries
+ *     of that one event list, so every screen agrees on the numbers.
  *
  * The polynomial coefficients are bundled hardcoded in the official Larq Android app at
  * `fb/f.java` line 10 (decompiled). The official app first tries to fetch them from a
@@ -80,44 +79,119 @@ object BottleMath {
         return raw.coerceIn(0.0, bottleSizeMl.toDouble())
     }
 
-    /**
-     * Sum of "drink" deltas for all sips logged on the given **logical date**, plus the
-     * `manualVolumeMl` total for any manually-logged sips on that date. "Logical date" is
-     * 3am-anchored — see [DAY_RESET_HOUR] / [logicalDateFor] — so an entry at 1am calendar
-     * day N is attributed to logical day N-1.
-     *
-     * Heuristic for BLE-synced sips: a delta from the previous entry is treated as a sip if
-     * water level dropped. Positive deltas (water level rose) are treated as fills and
-     * excluded. This is a simplification of the official app's algorithm, which also has
-     * drink/fill/skip thresholds we haven't fetched yet (RequestGetCapStateThresholdSettings).
-     *
-     * Manual sips have no real `distanceMm` reading, so they're excluded from the delta
-     * pass and added directly via their `manualVolumeMl`.
-     */
-    fun intakeOnDateMl(entries: List<SipEntity>, bottleSizeMl: Int, date: LocalDate): Double =
-        intakeOnDateMlSorted(entries.sortedBy { it.timestampSec }, bottleSizeMl, date)
+    // ── Drink / refill detection ──────────────────────────────────────────────────────────
 
-    /** Internal: same as [intakeOnDateMl] but caller has already sorted ascending. */
-    private fun intakeOnDateMlSorted(sortedAsc: List<SipEntity>, bottleSizeMl: Int, date: LocalDate): Double {
-        val zone = ZoneId.systemDefault()
-        val bleOnly = sortedAsc.filter { it.manualVolumeMl == null }
-        var totalDrunk = 0.0
-        for (i in 1 until bleOnly.size) {
-            val curr = bleOnly[i]
-            val currDate = logicalDateFor(Instant.ofEpochSecond(curr.timestampSec), zone)
-            if (currDate != date) continue
-            val prevVol = volumeMl(bleOnly[i - 1].distanceMm, bottleSizeMl) ?: continue
-            val currVol = volumeMl(curr.distanceMm, bottleSizeMl) ?: continue
-            val delta = prevVol - currVol
-            if (delta > 0) totalDrunk += delta
-        }
-        for (entry in sortedAsc) {
-            val manual = entry.manualVolumeMl ?: continue
-            val entryDate = logicalDateFor(Instant.ofEpochSecond(entry.timestampSec), zone)
-            if (entryDate == date) totalDrunk += manual.toDouble()
-        }
-        return totalDrunk
+    /** A level drop only counts as a drink once it exceeds this (`cap_drink_threshold_in_milliliter`). */
+    const val DRINK_THRESHOLD_ML = 25.0
+
+    /** A level rise only counts as a refill once it exceeds this (`cap_fill_threshold_in_milliliter`). */
+    const val REFILL_THRESHOLD_ML = 200.0
+
+    /** Floor applied to the raw polynomial output (`cap_min_volume_limit_in_milliliter`). */
+    private const val MIN_VOLUME_LIMIT_ML = -50.0
+
+    /**
+     * Readings at or beyond this distance are out of the sensor's usable range for the bottle
+     * size (`cap_size_680ml_tof_max` / `cap_size_1000ml_tof_max`) and are ignored.
+     */
+    private val tofMaxMm: Map<Int, Int> = mapOf(680 to 240, 1000 to 270)
+
+    /** Polynomial volume with only the official lower floor applied — the detector's input. */
+    private fun rawVolumeMl(distanceMm: Int, bottleSizeMl: Int): Double? {
+        val coeffs = polynomials[bottleSizeMl] ?: return null
+        val d = distanceMm.toDouble()
+        val raw = coeffs[0] * d * d * d * d + coeffs[1] * d * d * d + coeffs[2] * d * d + coeffs[3] * d + coeffs[4]
+        return raw.coerceAtLeast(MIN_VOLUME_LIMIT_ML)
     }
+
+    enum class LevelEventKind { Drink, Refill, Manual }
+
+    /**
+     * One thing that happened to the water: a drink or refill detected from bottle readings,
+     * or a hand-logged sip. [timestampSec] is the row's own timestamp (unique per row);
+     * [prevTimestampSec] is the previous bottle reading, i.e. when the drink could have begun.
+     */
+    data class LevelEvent(
+        val kind: LevelEventKind,
+        val timestampSec: Long,
+        val prevTimestampSec: Long,
+        val volumeMl: Double,
+    )
+
+    /**
+     * Classify the whole sip history into drinks, refills and manual sips, oldest first.
+     *
+     * Bottle readings follow the official app's `BottleVolumeAlgo` (decompiled `nc.a`), using
+     * its bundled default thresholds. It keeps a *reference level* — the water level at the
+     * last drink or refill — and for each new reading:
+     *  - **Refill** if the level rose more than [REFILL_THRESHOLD_ML] since the previous
+     *    reading. The reference moves up to the new level.
+     *  - **Drink** if the level is more than [DRINK_THRESHOLD_ML] below the reference. The
+     *    amount is reference − level, and the reference moves down.
+     *  - **Skip** otherwise. The reference stays put, so several small sips add up and are
+     *    counted together once they pass the threshold, while sensor jitter is ignored.
+     *
+     * Simplification: the official app has an extra branch for out-of-range readings (cap
+     * off / bottle tilted) whose decompiled logic is unclear; we simply ignore such readings.
+     *
+     * Manual sips carry their own volume and never touch the reference level.
+     */
+    fun levelEvents(entries: List<SipEntity>, bottleSizeMl: Int): List<LevelEvent> {
+        val sortedAsc = entries.sortedBy { it.timestampSec }
+        val out = mutableListOf<LevelEvent>()
+        val tofMax = tofMaxMm[bottleSizeMl] ?: Int.MAX_VALUE
+
+        var reference: Double? = null
+        var prevVolume = 0.0
+        var prevTimestamp = 0L
+        for (entry in sortedAsc) {
+            val manual = entry.manualVolumeMl
+            if (manual != null) {
+                out += LevelEvent(LevelEventKind.Manual, entry.timestampSec, entry.timestampSec, manual.toDouble())
+                continue
+            }
+            if (entry.distanceMm >= tofMax) continue
+            val volume = rawVolumeMl(entry.distanceMm, bottleSizeMl) ?: continue
+            val ref = reference
+            if (ref == null) {
+                // First reading establishes the baseline; nothing to compare against yet.
+                reference = volume
+            } else if (volume - prevVolume > REFILL_THRESHOLD_ML) {
+                out += LevelEvent(LevelEventKind.Refill, entry.timestampSec, prevTimestamp, volume - prevVolume)
+                reference = volume
+            } else if (ref - volume > DRINK_THRESHOLD_ML) {
+                out += LevelEvent(LevelEventKind.Drink, entry.timestampSec, prevTimestamp, ref - volume)
+                reference = volume
+            }
+            prevVolume = volume
+            prevTimestamp = entry.timestampSec
+        }
+        return out
+    }
+
+    private fun LevelEvent.isIntake() = kind == LevelEventKind.Drink || kind == LevelEventKind.Manual
+
+    private fun LevelEvent.logicalDate(zone: ZoneId) = logicalDateFor(Instant.ofEpochSecond(timestampSec), zone)
+
+    // ── Aggregators ───────────────────────────────────────────────────────────────────────
+
+    /**
+     * Intake in mL per **logical date** (3am-anchored, see [DAY_RESET_HOUR]) across the whole
+     * history: detected drinks plus manual sips. Dates with no intake are absent.
+     */
+    fun dailyIntakeMl(entries: List<SipEntity>, bottleSizeMl: Int): Map<LocalDate, Double> {
+        val zone = ZoneId.systemDefault()
+        val out = HashMap<LocalDate, Double>()
+        for (ev in levelEvents(entries, bottleSizeMl)) {
+            if (!ev.isIntake()) continue
+            out.merge(ev.logicalDate(zone), ev.volumeMl, Double::plus)
+        }
+        return out
+    }
+
+    /** Intake in mL on one logical date. See [dailyIntakeMl]. */
+    fun intakeOnDateMl(entries: List<SipEntity>, bottleSizeMl: Int, date: LocalDate): Double =
+        dailyIntakeMl(entries, bottleSizeMl)[date] ?: 0.0
 
     data class DrinkRecord(
         val timestampSec: Long,
@@ -129,43 +203,22 @@ object BottleMath {
     )
 
     /**
-     * Per-sip view of [entries] — every drinking event becomes one record. Same math as
-     * [intakeOnDateMl] but emitting each contributing event rather than collapsing to a daily
-     * sum. `timestampSec` is the entry's own timestamp (unique per row), suitable as a stable
-     * external ID for the Health Connect bridge.
-     *
-     * BLE-synced rows contribute when the polynomial delta from the previous BLE row is
-     * positive (water level dropped — user drank); the record's interval spans previous→current.
-     * Manual rows contribute as instantaneous records (start == end == entry time) carrying
-     * `manualVolumeMl` verbatim. Pairs with no polynomial calibration for the bottle size are
-     * silently skipped — same fall-through as the other aggregators.
+     * Per-sip view of [entries] — every intake event becomes one record, oldest first.
+     * `timestampSec` is the entry's own timestamp (unique per row), suitable as a stable
+     * external ID for the Health Connect bridge. Detected drinks span previous reading →
+     * this reading; manual sips are instantaneous.
      */
-    fun perSipDrinks(entries: List<SipEntity>, bottleSizeMl: Int): List<DrinkRecord> {
-        val sortedAsc = entries.sortedBy { it.timestampSec }
-        val bleOnly = sortedAsc.filter { it.manualVolumeMl == null }
-        val out = mutableListOf<DrinkRecord>()
-        for (i in 1 until bleOnly.size) {
-            val curr = bleOnly[i]
-            val prev = bleOnly[i - 1]
-            val prevVol = volumeMl(prev.distanceMm, bottleSizeMl) ?: continue
-            val currVol = volumeMl(curr.distanceMm, bottleSizeMl) ?: continue
-            val delta = prevVol - currVol
-            if (delta > 0) {
-                out += DrinkRecord(
-                    timestampSec = curr.timestampSec,
-                    startMs = prev.timestampSec * 1000L,
-                    endMs = curr.timestampSec * 1000L,
-                    volumeMl = delta,
-                )
-            }
+    fun perSipDrinks(entries: List<SipEntity>, bottleSizeMl: Int): List<DrinkRecord> =
+        levelEvents(entries, bottleSizeMl).filter { it.isIntake() }.map { ev ->
+            val manual = ev.kind == LevelEventKind.Manual
+            DrinkRecord(
+                timestampSec = ev.timestampSec,
+                startMs = (if (manual) ev.timestampSec else ev.prevTimestampSec) * 1000L,
+                endMs = ev.timestampSec * 1000L,
+                volumeMl = ev.volumeMl,
+                manual = manual,
+            )
         }
-        for (entry in sortedAsc) {
-            val manual = entry.manualVolumeMl ?: continue
-            val ms = entry.timestampSec * 1000L
-            out += DrinkRecord(entry.timestampSec, ms, ms, manual.toDouble(), manual = true)
-        }
-        return out.sortedBy { it.timestampSec }
-    }
 
     /**
      * Most recent BLE-synced reading's volume in mL, or null if no BLE entries / no
@@ -181,97 +234,46 @@ object BottleMath {
         return volumeMl(latest.distanceMm, bottleSizeMl)
     }
 
-    /**
-     * Sub-threshold positive deltas are sensor noise (bottle wobble, water sloshing as it's
-     * picked up, ToF distance jitter), not real refills. Empirically tuned: 30–32 mL transients
-     * showed up regularly in real captures, so this floor sits comfortably above that.
-     */
-    const val REFILL_THRESHOLD_ML = 50.0
-
     data class RefillSummary(val count: Int, val totalMl: Double)
 
-    /**
-     * Refills counted on the given **logical date** (3am-anchored, see [DAY_RESET_HOUR]).
-     * A "refill" is a positive volume delta (water level rose) above the noise threshold.
-     * Returns count and summed mL added.
-     *
-     * Manual sips are excluded from the delta chain — they're an intake event, not a
-     * bottle-level event, and their `distanceMm = 0` would translate to a junk polynomial
-     * volume that breaks the deltas of adjacent BLE rows.
-     */
+    /** Refills detected on the given **logical date**: count and summed mL added. */
     fun refillsOnDate(entries: List<SipEntity>, bottleSizeMl: Int, date: LocalDate): RefillSummary {
         val zone = ZoneId.systemDefault()
-        val bleOnly = entries.asSequence()
-            .filter { it.manualVolumeMl == null }
-            .sortedBy { it.timestampSec }
-            .toList()
-
-        var count = 0
-        var totalMl = 0.0
-        for (i in 1 until bleOnly.size) {
-            val curr = bleOnly[i]
-            val currDate = logicalDateFor(Instant.ofEpochSecond(curr.timestampSec), zone)
-            if (currDate != date) continue
-            val prevVol = volumeMl(bleOnly[i - 1].distanceMm, bottleSizeMl) ?: continue
-            val currVol = volumeMl(curr.distanceMm, bottleSizeMl) ?: continue
-            val delta = currVol - prevVol  // positive = refill
-            if (delta > REFILL_THRESHOLD_ML) {
-                count += 1
-                totalMl += delta
-            }
-        }
-        return RefillSummary(count, totalMl)
+        val refills = levelEvents(entries, bottleSizeMl)
+            .filter { it.kind == LevelEventKind.Refill && it.logicalDate(zone) == date }
+        return RefillSummary(refills.size, refills.sumOf { it.volumeMl })
     }
 
     /**
-     * Drink-volume binned by hour-of-day for the given **logical date** (3am-anchored, see
-     * [DAY_RESET_HOUR]). Returns a 24-element DoubleArray; index = wall-clock hour (0..23),
-     * value = mL drunk that hour. Note: an entry's bucket is its actual local-time hour, but
-     * its date membership is the logical date — so a 1am sip on calendar day N lands in
-     * bucket 1 of logical day N-1's chart.
-     * Manual sips are added directly into the bucket matching their local-time hour;
-     * BLE-synced sips contribute via the same delta logic as [intakeOnDateMl].
+     * Intake binned by hour-of-day for the given **logical date**. Returns a 24-element
+     * DoubleArray; index = wall-clock hour (0..23). An event's bucket is its actual local
+     * hour but its date membership is the logical date — so a 1am sip on calendar day N
+     * lands in bucket 1 of logical day N-1's chart.
      */
     fun hourlyIntakeMl(entries: List<SipEntity>, bottleSizeMl: Int, date: LocalDate): DoubleArray {
         val zone = ZoneId.systemDefault()
-        val sortedAsc = entries.sortedBy { it.timestampSec }
-        val bleOnly = sortedAsc.filter { it.manualVolumeMl == null }
         val out = DoubleArray(24)
-
-        for (i in 1 until bleOnly.size) {
-            val curr = bleOnly[i]
-            val currInstant = Instant.ofEpochSecond(curr.timestampSec)
-            val currLocal = currInstant.atZone(zone).toLocalDateTime()
-            if (logicalDateFor(currInstant, zone) != date) continue
-            val prevVol = volumeMl(bleOnly[i - 1].distanceMm, bottleSizeMl) ?: continue
-            val currVol = volumeMl(curr.distanceMm, bottleSizeMl) ?: continue
-            val delta = prevVol - currVol  // positive = drank
-            if (delta > 0) out[currLocal.hour] += delta
-        }
-        for (entry in sortedAsc) {
-            val manual = entry.manualVolumeMl ?: continue
-            val instant = Instant.ofEpochSecond(entry.timestampSec)
-            val local = instant.atZone(zone).toLocalDateTime()
-            if (logicalDateFor(instant, zone) != date) continue
-            out[local.hour] += manual.toDouble()
+        for (ev in levelEvents(entries, bottleSizeMl)) {
+            if (!ev.isIntake() || ev.logicalDate(zone) != date) continue
+            out[Instant.ofEpochSecond(ev.timestampSec).atZone(zone).hour] += ev.volumeMl
         }
         return out
     }
 
     /**
-     * Daily intake totals for the last [n] days, oldest first → today last.
+     * Daily intake totals for the [n] days ending at [end] (default today), oldest first.
      * Includes days with zero intake so the chart has a consistent N-bar shape.
      */
     fun lastNDayIntakes(
         entries: List<SipEntity>,
         bottleSizeMl: Int,
         n: Int = 7,
+        end: LocalDate = currentLogicalDate(),
     ): List<Pair<LocalDate, Double>> {
-        val today = currentLogicalDate()
-        val sortedAsc = entries.sortedBy { it.timestampSec }
+        val daily = dailyIntakeMl(entries, bottleSizeMl)
         return (n - 1 downTo 0).map { offset ->
-            val date = today.minusDays(offset.toLong())
-            date to intakeOnDateMlSorted(sortedAsc, bottleSizeMl, date)
+            val date = end.minusDays(offset.toLong())
+            date to (daily[date] ?: 0.0)
         }
     }
 
@@ -286,11 +288,10 @@ object BottleMath {
     ): Int {
         if (dailyGoalMl <= 0) return 0
         val today = currentLogicalDate()
-        val sortedAsc = entries.sortedBy { it.timestampSec }
+        val daily = dailyIntakeMl(entries, bottleSizeMl)
         var streak = 0
         for (offset in 0 until 365) {  // cap to a year
-            val date = today.minusDays(offset.toLong())
-            val intake = intakeOnDateMlSorted(sortedAsc, bottleSizeMl, date)
+            val intake = daily[today.minusDays(offset.toLong())] ?: 0.0
             if (intake >= dailyGoalMl) streak += 1 else break
         }
         return streak
