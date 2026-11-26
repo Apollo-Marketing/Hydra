@@ -23,15 +23,20 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.text.font.FontWeight
 import com.hydra.app.ui.theme.Cyan
+import com.hydra.app.ui.theme.Goal
+import com.hydra.app.ui.theme.InkOnAccent
+import com.hydra.app.ui.theme.goalInk
 import com.hydra.app.ui.theme.LocalHydraColors
 import com.hydra.app.ui.theme.Warn
 import java.time.LocalDate
 
 /**
- * 7-day intake chart. Bars hitting goal use the cyan gradient + glow; today's bar uses
- * the warn-orange gradient instead so it pops, even when it hasn't yet cleared goal. A
- * dashed cyan goal line floats across the chart at the goal value.
+ * 7-day intake chart. Days that reached the goal are solid green with a check mark, and their
+ * label is green; other days are pale cyan, and today's bar is orange until it gets there. A
+ * dashed line floats across the chart at the goal value.
  *
  * Renders the day-of-week labels in a row of clickable cells beneath the canvas so a
  * caller can hook day-detail navigation onto a tap.
@@ -86,8 +91,8 @@ fun WeeklyBarChart(
                 val isToday = date == today
                 val hitGoal = goalMl > 0 && ml >= goalMl
                 val brush = when {
+                    hitGoal -> Brush.verticalGradient(listOf(Goal, Goal.copy(alpha = 0.75f)))
                     isToday -> Brush.verticalGradient(listOf(Warn, Warn.copy(alpha = 0.3f)))
-                    hitGoal -> Brush.verticalGradient(listOf(Cyan, Cyan.copy(alpha = 0.3f)))
                     ml > 0 -> Brush.verticalGradient(listOf(Cyan.copy(alpha = 0.45f), Cyan.copy(alpha = 0.15f)))
                     else -> Brush.verticalGradient(listOf(colors.hair, colors.hair))
                 }
@@ -97,16 +102,31 @@ fun WeeklyBarChart(
                     size = Size(barWidth * 0.78f, barHeight),
                     cornerRadius = CornerRadius(4f, 4f),
                 )
+                if (hitGoal) {
+                    // Check mark near the top of the bar.
+                    val u = with(density) { 1.dp.toPx() }
+                    val cx = x + barWidth / 2f
+                    val cy = y + 12f * u
+                    val stroke = 2f * u
+                    drawLine(InkOnAccent, Offset(cx - 5f * u, cy), Offset(cx - 1.5f * u, cy + 3.5f * u), stroke, StrokeCap.Round)
+                    drawLine(InkOnAccent, Offset(cx - 1.5f * u, cy + 3.5f * u), Offset(cx + 5f * u, cy - 3.5f * u), stroke, StrokeCap.Round)
+                }
             }
         }
         Spacer(Modifier.size(6.dp))
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            daily.forEach { (date, _) ->
+            daily.forEach { (date, ml) ->
                 val isToday = date == today
+                val hitGoal = goalMl > 0 && ml >= goalMl
                 val label = date.dayOfWeek.name.take(3).lowercase().replaceFirstChar { it.uppercase() }
                 Text(
                     text = label,
-                    color = if (isToday) Warn else colors.inkDim,
+                    color = when {
+                        hitGoal -> colors.goalInk
+                        isToday -> Warn
+                        else -> colors.inkDim
+                    },
+                    fontWeight = if (hitGoal) FontWeight.SemiBold else null,
                     style = MaterialTheme.typography.labelMedium,
                     modifier = Modifier
                         .weight(1f)

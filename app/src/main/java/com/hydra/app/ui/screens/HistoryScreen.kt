@@ -70,6 +70,8 @@ import com.hydra.app.ui.theme.InkOnAccent
 import com.hydra.app.ui.theme.LocalHydraColors
 import com.hydra.app.ui.theme.Violet
 import com.hydra.app.ui.theme.Warn
+import com.hydra.app.ui.theme.Goal
+import com.hydra.app.ui.theme.goalInk
 import java.time.Instant
 import java.time.LocalDate
 import kotlinx.coroutines.launch
@@ -234,9 +236,10 @@ fun HistoryScreen(modifier: Modifier = Modifier) {
                                 leftLabel = "Total",
                                 leftValue = "%,d".format(totalMl.roundToInt()),
                                 leftUnit = " ml",
-                                rightLabel = "Of goal",
+                                rightLabel = if (goalPct >= 100) "Goal reached ✓" else "Of goal",
                                 rightValue = goalPct.toString(),
                                 rightUnit = " %",
+                                rightColor = if (goalPct >= 100) colors.goalInk else Cyan,
                             )
                             HourlyBarChart(intakePerHour = hourly[anchor] ?: DoubleArray(24))
                         }
@@ -281,6 +284,7 @@ fun HistoryScreen(modifier: Modifier = Modifier) {
                                 leftUnit = " ml",
                                 rightLabel = "Goals hit",
                                 rightValue = goalsHit.toString(),
+                                rightColor = if (goalsHit > 0) colors.goalInk else Cyan,
                                 rightUnit = " / ${week.size}",
                             )
                             // Transparent tap targets over each bar + label column open that day.
@@ -331,6 +335,7 @@ fun HistoryScreen(modifier: Modifier = Modifier) {
                                 leftUnit = " ml",
                                 rightLabel = "Goals hit",
                                 rightValue = goalsHit.toString(),
+                                rightColor = if (goalsHit > 0) colors.goalInk else Cyan,
                                 rightUnit = " / ${days.size}",
                             )
                             MonthCalendar(
@@ -340,18 +345,22 @@ fun HistoryScreen(modifier: Modifier = Modifier) {
                                 today = today,
                                 onDayClick = openDay,
                             )
+                            Text(
+                                best?.let { (date, ml) ->
+                                    "Best day: ${date.format(DateTimeFormatter.ofPattern("MMM d", Locale.getDefault()))} · ${"%,d".format(ml.roundToInt())} ml"
+                                } ?: "No sips this month.",
+                                color = colors.inkSoft,
+                                style = MaterialTheme.typography.bodySmall,
+                            )
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
-                                Text(
-                                    best?.let { (date, ml) ->
-                                        "Best day: ${date.format(DateTimeFormatter.ofPattern("MMM d", Locale.getDefault()))} · ${"%,d".format(ml.roundToInt())} ml"
-                                    } ?: "No sips this month.",
-                                    color = colors.inkSoft,
-                                    style = MaterialTheme.typography.bodySmall,
-                                )
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    Box(Modifier.size(12.dp).clip(RoundedCornerShape(3.dp)).background(Goal))
+                                    Text("Goal reached", color = colors.inkSoft, style = MaterialTheme.typography.labelSmall)
+                                }
                                 HeatmapLegend()
                             }
                         }
@@ -384,6 +393,7 @@ private fun SummaryRow(
     rightLabel: String,
     rightValue: String,
     rightUnit: String,
+    rightColor: Color = Cyan,
 ) {
     val colors = LocalHydraColors.current
     Row(
@@ -401,7 +411,7 @@ private fun SummaryRow(
         Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text(rightLabel, color = colors.inkSoft, style = MaterialTheme.typography.bodySmall)
             Row(verticalAlignment = Alignment.Bottom) {
-                Text(rightValue, color = Cyan, fontWeight = FontWeight.SemiBold, fontSize = 24.sp)
+                Text(rightValue, color = rightColor, fontWeight = FontWeight.SemiBold, fontSize = 24.sp)
                 Text(rightUnit, color = colors.inkSoft, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(bottom = 4.dp))
             }
         }
@@ -410,7 +420,8 @@ private fun SummaryRow(
 
 /**
  * Month grid: one cell per day, shaded by intake relative to the goal (or the month's best
- * day if that is higher). Days that hit the goal get a cyan ring; today's number is orange.
+ * day if that is higher). Days that reached the goal are solid green with a check mark;
+ * today's number is orange (or ringed, once today has reached the goal).
  */
 @Composable
 private fun MonthCalendar(
@@ -463,22 +474,33 @@ private fun MonthCalendar(
                             .background(
                                 when {
                                     future -> Color.Transparent
+                                    hitGoal -> Goal
                                     level == 0 -> colors.hair
                                     else -> Cyan.copy(alpha = (0.10f + level * 0.20f).coerceAtMost(1f))
                                 },
                             )
-                            .let { if (hitGoal) it.border(BorderStroke(1.5.dp, Cyan), cellShape) else it }
+                            .let { if (hitGoal && date == today) it.border(BorderStroke(2.dp, colors.ink), cellShape) else it }
                             .clickable(enabled = !future) { onDayClick(date) },
                         contentAlignment = Alignment.Center,
                     ) {
+                        if (hitGoal) {
+                            Text(
+                                "✓",
+                                color = InkOnAccent,
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.align(Alignment.TopEnd).padding(top = 1.dp, end = 4.dp),
+                            )
+                        }
                         Text(
                             date.dayOfMonth.toString(),
                             color = when {
                                 future -> colors.inkDim
+                                hitGoal -> InkOnAccent
                                 date == today -> Warn
                                 else -> colors.ink
                             },
-                            fontWeight = if (date == today) FontWeight.Bold else FontWeight.Medium,
+                            fontWeight = if (date == today || hitGoal) FontWeight.Bold else FontWeight.Medium,
                             style = MaterialTheme.typography.bodySmall,
                         )
                     }

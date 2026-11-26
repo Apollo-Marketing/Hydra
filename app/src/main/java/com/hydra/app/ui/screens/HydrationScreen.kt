@@ -2,6 +2,8 @@ package com.hydra.app.ui.screens
 
 import com.hydra.app.ui.theme.Ok
 import com.hydra.app.ui.theme.Warn
+import com.hydra.app.ui.theme.goalInk
+import com.hydra.app.ui.theme.Goal
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -183,7 +185,7 @@ fun HydrationScreen(
             if (showPace) {
                 val onPaceBand = dailyGoal * 0.05
                 val (paceText, paceColor) = when {
-                    goalReached -> "Goal reached" to Ok
+                    goalReached -> "✓ Goal reached" to colors.goalInk
                     paceDiffMl >= onPaceBand -> "${"%,d".format(paceDiffMl.roundToInt())} ml ahead of pace" to Ok
                     paceDiffMl <= -onPaceBand -> "${"%,d".format((-paceDiffMl).roundToInt())} ml behind pace" to Warn
                     else -> "On pace" to Ok
@@ -402,7 +404,7 @@ private fun StreakCard(streak: Int, modifier: Modifier = Modifier) {
                             .weight(1f)
                             .height(4.dp)
                             .clip(RoundedCornerShape(2.dp))
-                            .background(if (on) Cyan else colors.hair),
+                            .background(if (on) Goal else colors.hair),
                     )
                 }
             }

@@ -13,6 +13,12 @@ val CyanGlow = Color(0x405CD6FF)             // 25% — for shadows/halos
 val Violet = Color(0xFF9B8CFF)
 val Warn = Color(0xFFFF9C5C)
 val Ok = Color(0xFF7BE4A8)
+/** A day that reached its goal: the fill for calendar cells and chart bars, in both themes. */
+val Goal = Color(0xFF34C985)
+
+/** Goal green for text and small marks, dark enough to read on the light theme. */
+val HydraColors.goalInk: Color get() = if (isDark) Ok else Color(0xFF0E8A52)
+
 val InkOnAccent = Color(0xFF001220)          // dark text on cyan/gradient buttons
 
 /** Signature linear-gradient(135deg, cyan, violet) — used on CTAs, ring, big numbers. */
