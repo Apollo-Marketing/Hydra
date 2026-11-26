@@ -57,30 +57,48 @@ import kotlinx.coroutines.flow.MutableStateFlow
 private const val TAG = "HydraWidget"
 
 /**
- * The app's own theme choice (Settings → Theme): null follows the system, otherwise it is
- * forced dark or light. Set from the stored data just before the widget is drawn.
+ * The widget's colours. Passed down as a parameter (not read from a global) so that every part
+ * of the widget is redrawn when the theme changes; otherwise unchanged parts keep old colours.
  */
-@Volatile private var forceDark: Boolean? = null
+private data class Palette(
+    val card: androidx.glance.unit.ColorProvider,
+    val ink: androidx.glance.unit.ColorProvider,
+    val soft: androidx.glance.unit.ColorProvider,
+    val pillBg: androidx.glance.unit.ColorProvider,
+    val pillInk: androidx.glance.unit.ColorProvider,
+    val warnBg: androidx.glance.unit.ColorProvider,
+    val warnInk: androidx.glance.unit.ColorProvider,
+    val goodBg: androidx.glance.unit.ColorProvider,
+    val goodInk: androidx.glance.unit.ColorProvider,
+)
 
-/** A day / night pair; with the theme forced, both sides get the same colour. */
-private fun pick(day: Long, night: Long): androidx.glance.unit.ColorProvider = when (forceDark) {
-    true -> ColorProvider(day = Color(night), night = Color(night))
-    false -> ColorProvider(day = Color(day), night = Color(day))
-    null -> ColorProvider(day = Color(day), night = Color(night))
+/**
+ * [forceDark] is the app's own theme choice (Settings → Theme): null follows the system, so the
+ * launcher switches between each day / night pair; otherwise both sides get the same colour.
+ *
+ * Glass card: a see-through tint the wallpaper shows through, with a soft sheen and a bright
+ * rim drawn on top (see glassBitmap). Android can't blur what is behind a widget, so the tint
+ * stays opaque enough for the text to remain readable on a busy wallpaper. Pills are
+ * translucent too, tinted amber or green when they carry a status.
+ */
+private fun paletteFor(forceDark: Boolean?): Palette {
+    fun pick(day: Long, night: Long) = when (forceDark) {
+        true -> ColorProvider(day = Color(night), night = Color(night))
+        false -> ColorProvider(day = Color(day), night = Color(day))
+        null -> ColorProvider(day = Color(day), night = Color(night))
+    }
+    return Palette(
+        card = pick(0xA6FFFFFF, 0x8C0B1322),
+        ink = pick(0xFF0F1A2B, 0xFFF2F6FC),
+        soft = pick(0xFF4A5A73, 0xFFC3CFE2),
+        pillBg = pick(0x1A0F1A2B, 0x2EFFFFFF),
+        pillInk = pick(0xFF26344A, 0xFFF2F6FC),
+        warnBg = pick(0xFFFBEED6, 0x52FFB03A),
+        warnInk = pick(0xFF7A4600, 0xFFFFDCA0),
+        goodBg = pick(0xFFDDF3E8, 0x4D4FE0A0),
+        goodInk = pick(0xFF0B6B47, 0xFFB4F7D8),
+    )
 }
-
-// Glass card: a see-through tint the wallpaper shows through, with a soft sheen and a bright
-// rim drawn on top (see glassBitmap). Android can't blur what is behind a widget, so the tint
-// stays opaque enough for the text to remain readable on a busy wallpaper.
-private val Card get() = pick(0xA6FFFFFF, 0x8C0B1322)
-private val Ink get() = pick(0xFF0F1A2B, 0xFFF2F6FC)
-private val Soft get() = pick(0xFF4A5A73, 0xFFA9B8D0)
-private val PillBg get() = pick(0x1A0F1A2B, 0x29FFFFFF)
-private val PillInk get() = pick(0xFF26344A, 0xFFD5DEEC)
-private val WarnBg get() = pick(0xFFFBEED6, 0xFF3A2C12)
-private val WarnInk get() = pick(0xFF7A4600, 0xFFFFC46B)
-private val GoodBg get() = pick(0xFFE1F4EB, 0xFF12332A)
-private val GoodInk get() = pick(0xFF0B6B47, 0xFF6FE0B0)
 
 /**
  * Home-screen widget. Small (2×2): the ring with today's total and the pace line.
@@ -98,14 +116,14 @@ open class HydraWidget : GlanceAppWidget() {
             .onFailure { Log.w(TAG, "load failed: ${it.message}") }
         provideContent {
             val data by latest.collectAsState()
-            forceDark = data?.forceDark
+            val c = paletteFor(data?.forceDark)
             val size = LocalSize.current
             val wide = size.width >= WIDE_MIN_WIDTH && size.width.value >= size.height.value * 1.4f
             val density = LocalContext.current.resources.displayMetrics.density
             Box(
                 modifier = GlanceModifier
                     .fillMaxSize()
-                    .background(Card)
+                    .background(c.card)
                     .cornerRadius(CORNER_DP.dp)
                     .clickable(actionStartActivity<MainActivity>()),
                 contentAlignment = Alignment.Center,
@@ -118,9 +136,9 @@ open class HydraWidget : GlanceAppWidget() {
                 )
                 val d = data
                 when {
-                    d == null -> Text("Open Hydra", style = TextStyle(color = Soft, fontSize = 13.sp))
-                    wide -> Wide(d, scaleFor(size, 720f))
-                    else -> Small(d, scaleFor(size, 340f))
+                    d == null -> Text("Open Hydra", style = TextStyle(color = c.soft, fontSize = 13.sp))
+                    wide -> Wide(d, scaleFor(size, 720f), c)
+                    else -> Small(d, scaleFor(size, 340f), c)
                 }
             }
         }
@@ -161,7 +179,7 @@ private fun scaleFor(size: DpSize, mockWidth: Float): Float =
     minOf(size.width.value / mockWidth, size.height.value / 340f)
 
 @Composable
-private fun Small(d: WidgetData, k: Float) {
+private fun Small(d: WidgetData, k: Float, c: Palette) {
     Column(
         modifier = GlanceModifier.fillMaxSize().padding((20 * k).dp),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -172,12 +190,12 @@ private fun Small(d: WidgetData, k: Float) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(
                     "%,d".format(d.intakeMl),
-                    style = TextStyle(color = Ink, fontSize = (46 * k).sp, fontWeight = FontWeight.Bold),
+                    style = TextStyle(color = c.ink, fontSize = (46 * k).sp, fontWeight = FontWeight.Bold),
                     maxLines = 1,
                 )
                 Text(
                     "of ${"%,d".format(d.goalMl)} ml",
-                    style = TextStyle(color = Soft, fontSize = maxOf(10f, 17 * k).sp),
+                    style = TextStyle(color = c.soft, fontSize = maxOf(10f, 17 * k).sp),
                     maxLines = 1,
                 )
             }
@@ -187,7 +205,7 @@ private fun Small(d: WidgetData, k: Float) {
             Text(
                 if (it.behind) "${it.text} pace" else it.text,
                 style = TextStyle(
-                    color = if (it.behind) WarnInk else GoodInk,
+                    color = if (it.behind) c.warnInk else c.goodInk,
                     fontSize = maxOf(12f, 19 * k).sp,
                     fontWeight = FontWeight.Medium,
                 ),
@@ -198,7 +216,7 @@ private fun Small(d: WidgetData, k: Float) {
 }
 
 @Composable
-private fun Wide(d: WidgetData, k: Float) {
+private fun Wide(d: WidgetData, k: Float, c: Palette) {
     val pillFont = maxOf(12f, 19 * k)
     Row(
         modifier = GlanceModifier.fillMaxSize().padding(horizontal = (42 * k).dp),
@@ -209,7 +227,7 @@ private fun Wide(d: WidgetData, k: Float) {
             Ring(d)
             Text(
                 "${d.percent}%",
-                style = TextStyle(color = Ink, fontSize = (50 * k).sp, fontWeight = FontWeight.Bold),
+                style = TextStyle(color = c.ink, fontSize = (50 * k).sp, fontWeight = FontWeight.Bold),
                 maxLines = 1,
             )
         }
@@ -218,22 +236,22 @@ private fun Wide(d: WidgetData, k: Float) {
             Row(verticalAlignment = Alignment.Bottom) {
                 Text(
                     "%,d".format(d.intakeMl),
-                    style = TextStyle(color = Ink, fontSize = (78 * k).sp, fontWeight = FontWeight.Bold),
+                    style = TextStyle(color = c.ink, fontSize = (78 * k).sp, fontWeight = FontWeight.Bold),
                     maxLines = 1,
                 )
-                Text(" ml", style = TextStyle(color = Soft, fontSize = (28 * k).sp), maxLines = 1)
+                Text(" ml", style = TextStyle(color = c.soft, fontSize = (28 * k).sp), maxLines = 1)
             }
             Spacer(GlanceModifier.height((14 * k).dp))
-            d.pace?.let { Pill(it.text, pillFont, k, warn = it.behind, good = !it.behind) }
+            d.pace?.let { Pill(it.text, pillFont, k, c, warn = it.behind, good = !it.behind) }
             if (d.batteryPercent != null || d.filterPercent != null) {
                 Spacer(GlanceModifier.height((14 * k).dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     d.batteryPercent?.let {
-                        Pill("$it%", pillFont, k, warn = d.batteryLow, icon = R.drawable.ic_widget_battery, iconLabel = "Bottle battery")
+                        Pill("$it%", pillFont, k, c, warn = d.batteryLow, icon = R.drawable.ic_widget_battery, iconLabel = "Bottle battery")
                         Spacer(GlanceModifier.width((12 * k).dp))
                     }
                     d.filterPercent?.let {
-                        Pill("$it%", pillFont, k, warn = d.filterLow, icon = R.drawable.ic_widget_filter, iconLabel = "Filter")
+                        Pill("$it%", pillFont, k, c, warn = d.filterLow, icon = R.drawable.ic_widget_filter, iconLabel = "Filter")
                     }
                 }
             }
@@ -243,7 +261,7 @@ private fun Wide(d: WidgetData, k: Float) {
                 Text(
                     it,
                     modifier = GlanceModifier.padding(start = (pillFont * 0.4f).dp),
-                    style = TextStyle(color = Soft, fontSize = maxOf(11f, 16 * k).sp),
+                    style = TextStyle(color = c.soft, fontSize = maxOf(11f, 16 * k).sp),
                     maxLines = 1,
                 )
             }
@@ -256,13 +274,14 @@ private fun Pill(
     text: String,
     font: Float,
     k: Float,
+    c: Palette,
     warn: Boolean,
     good: Boolean = false,
     icon: Int? = null,
     iconLabel: String? = null,
 ) {
-    val bg = when { warn -> WarnBg; good -> GoodBg; else -> PillBg }
-    val ink = when { warn -> WarnInk; good -> GoodInk; else -> PillInk }
+    val bg = when { warn -> c.warnBg; good -> c.goodBg; else -> c.pillBg }
+    val ink = when { warn -> c.warnInk; good -> c.goodInk; else -> c.pillInk }
     Row(
         modifier = GlanceModifier
             .background(bg)
