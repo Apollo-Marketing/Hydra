@@ -1,5 +1,9 @@
 package com.hydra.app
 
+import kotlinx.coroutines.runBlocking
+import com.hydra.app.data.SipRepository
+import com.hydra.app.data.HydraDatabase
+import androidx.compose.runtime.mutableIntStateOf
 import com.hydra.app.notify.LowBatteryAlert
 import com.hydra.app.notify.PaceNudge
 import com.hydra.app.sync.BackgroundSync
@@ -30,6 +34,16 @@ private const val ACTION_HC_RATIONALE = "androidx.health.ACTION_SHOW_PERMISSIONS
 private const val CATEGORY_HEALTH_PERMISSIONS = "android.intent.category.HEALTH_PERMISSIONS"
 
 class MainActivity : ComponentActivity() {
+    /** Bumped when a Health Connect rationale intent reaches the already-open screen. */
+    private var hcRationaleRequests by mutableIntStateOf(0)
+
+    // singleTop: a second launch reuses this screen instead of stacking another copy, which
+    // would open a second connection to the bottle.
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        if (intent.isHealthConnectRationale()) hcRationaleRequests++
+    }
+
     override fun onStart() {
         super.onStart()
         AppForeground.set(true)
@@ -54,6 +68,10 @@ class MainActivity : ComponentActivity() {
             PaceNudge.postNudge(this, 400, 600, 2000)
             LowBatteryAlert.postAlert(this, 18)
         }
+        // Dev aid: `--ez full_resync true` wipes the local sip log so the next sync downloads everything.
+        if (BuildConfig.DEBUG && intent?.getBooleanExtra("full_resync", false) == true) {
+            runBlocking { SipRepository(HydraDatabase.get(this@MainActivity).sipDao()).deleteAll() }
+        }
         setContent {
             val mode by prefs.themeMode.collectAsState(initial = ThemeMode.System)
             val dark = when (mode) {
@@ -68,6 +86,7 @@ class MainActivity : ComponentActivity() {
             }
             LaunchedEffect(Unit) { updates.checkOnLaunch() }
             var hcPrivacyOpen by rememberSaveable { mutableStateOf(launchedForHealthConnectRationale) }
+            LaunchedEffect(hcRationaleRequests) { if (hcRationaleRequests > 0) hcPrivacyOpen = true }
             HydraTheme(dark = dark) {
                 MainScreen()
                 HealthConnectPrivacyDialog(open = hcPrivacyOpen, onDismiss = { hcPrivacyOpen = false })

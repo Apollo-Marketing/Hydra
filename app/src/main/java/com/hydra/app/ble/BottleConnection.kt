@@ -50,6 +50,7 @@ object BottleConfig {
     // We always use SEARCH_ALGO_TIMESTAMP — empirically it returns batches per request,
     // whereas INCREMENT mode trickles one entry per request and is ~10× slower.
     const val SIP_PAGE_SIZE = 100                 // entries per RequestGetCapTofLog page
+    const val SIP_ENTRIES_PER_REPLY = 7           // the cap answers each request with one notification of at most this many entries
     const val SIP_PAGE_QUIET_MS = 400L            // end-of-page once entries are flowing: this long without one
     const val SIP_PAGE_FIRST_RESPONSE_MS = 2_500L // wait this long for the FIRST entry of a new page before declaring it empty
                                                   // (older bottles take longer to seek deeper into the ring buffer)
@@ -419,7 +420,14 @@ class BottleConnection(
                         repository.upsertAll(entries)
                         if (_syncState.value is SyncState.Syncing) {
                             currentPage.addAll(entries)
-                            armPageQuietTimer()
+                            if (entries.size >= BottleConfig.SIP_ENTRIES_PER_REPLY) {
+                                // A full reply means there is more to fetch: ask for the next
+                                // batch right away instead of waiting out the quiet timer.
+                                pageQuietJob?.cancel()
+                                onPageComplete()
+                            } else {
+                                armPageQuietTimer()
+                            }
                         }
                     }
                     entries.forEach { _events.tryEmit(BottleEvent.SipReceived(now, seq, it)) }
