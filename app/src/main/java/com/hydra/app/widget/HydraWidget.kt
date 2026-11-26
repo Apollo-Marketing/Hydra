@@ -1,0 +1,272 @@
+package com.hydra.app.widget
+
+import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.LinearGradient
+import android.graphics.Paint
+import android.graphics.RectF
+import android.graphics.Shader
+import android.util.Log
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.DpSize
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.glance.ColorFilter
+import androidx.glance.GlanceId
+import androidx.glance.GlanceModifier
+import androidx.glance.Image
+import androidx.glance.ImageProvider
+import androidx.glance.LocalSize
+import androidx.glance.action.actionStartActivity
+import androidx.glance.action.clickable
+import androidx.glance.appwidget.GlanceAppWidget
+import androidx.glance.appwidget.GlanceAppWidgetReceiver
+import androidx.glance.appwidget.SizeMode
+import androidx.glance.appwidget.cornerRadius
+import androidx.glance.appwidget.provideContent
+import androidx.glance.appwidget.updateAll
+import androidx.glance.background
+import androidx.glance.color.ColorProvider
+import androidx.glance.layout.Alignment
+import androidx.glance.layout.Box
+import androidx.glance.layout.Column
+import androidx.glance.layout.ContentScale
+import androidx.glance.layout.Row
+import androidx.glance.layout.Spacer
+import androidx.glance.layout.fillMaxHeight
+import androidx.glance.layout.fillMaxSize
+import androidx.glance.layout.fillMaxWidth
+import androidx.glance.layout.height
+import androidx.glance.layout.padding
+import androidx.glance.layout.width
+import androidx.glance.text.FontWeight
+import androidx.glance.text.Text
+import androidx.glance.text.TextStyle
+import com.hydra.app.MainActivity
+import com.hydra.app.R
+import kotlin.math.cos
+import kotlin.math.sin
+import kotlinx.coroutines.flow.MutableStateFlow
+
+private const val TAG = "HydraWidget"
+
+// Day / night pairs; the launcher switches between them with the system theme.
+private val Card = ColorProvider(day = Color(0xFFFFFFFF), night = Color(0xFF0E1626))
+private val Ink = ColorProvider(day = Color(0xFF0F1A2B), night = Color(0xFFF2F6FC))
+private val Soft = ColorProvider(day = Color(0xFF4A5A73), night = Color(0xFFA9B8D0))
+private val PillBg = ColorProvider(day = Color(0xFFEEF2F8), night = Color(0xFF18233A))
+private val PillInk = ColorProvider(day = Color(0xFF26344A), night = Color(0xFFD5DEEC))
+private val WarnBg = ColorProvider(day = Color(0xFFFBEED6), night = Color(0xFF3A2C12))
+private val WarnInk = ColorProvider(day = Color(0xFF7A4600), night = Color(0xFFFFC46B))
+private val GoodBg = ColorProvider(day = Color(0xFFE1F4EB), night = Color(0xFF12332A))
+private val GoodInk = ColorProvider(day = Color(0xFF0B6B47), night = Color(0xFF6FE0B0))
+
+/**
+ * Home-screen widget. Small (2×2): the ring with today's total and the pace line.
+ * Wide (4×2): the ring with the percentage, the total, and pills for pace, bottle battery
+ * and filter. It only shows what the app has already stored — it never talks to the bottle —
+ * so it is as fresh as the last sync; [refresh] is called whenever that data changes.
+ */
+class HydraWidget : GlanceAppWidget() {
+
+    override val sizeMode = SizeMode.Responsive(setOf(SMALL, WIDE))
+
+    override suspend fun provideGlance(context: Context, id: GlanceId) {
+        runCatching { latest.value = WidgetData.load(context) }
+            .onFailure { Log.w(TAG, "load failed: ${it.message}") }
+        provideContent {
+            val data by latest.collectAsState()
+            val wide = LocalSize.current.width >= WIDE.width
+            Box(
+                modifier = GlanceModifier
+                    .fillMaxSize()
+                    .background(Card)
+                    .cornerRadius(26.dp)
+                    .clickable(actionStartActivity<MainActivity>()),
+                contentAlignment = Alignment.Center,
+            ) {
+                val d = data
+                when {
+                    d == null -> Text("Open Hydra", style = TextStyle(color = Soft, fontSize = 13.sp))
+                    wide -> Wide(d)
+                    else -> Small(d)
+                }
+            }
+        }
+    }
+
+    companion object {
+        private val SMALL = DpSize(110.dp, 110.dp)
+        private val WIDE = DpSize(250.dp, 110.dp)
+
+        /** Latest data, held here so a widget that is already on screen redraws from it. */
+        private val latest = MutableStateFlow<WidgetData?>(null)
+
+        /** Reload the stored data and redraw every placed widget. Safe to call from anywhere. */
+        suspend fun refresh(context: Context) {
+            runCatching {
+                latest.value = WidgetData.load(context)
+                HydraWidget().updateAll(context.applicationContext)
+            }.onFailure { Log.w(TAG, "refresh failed: ${it.message}") }
+        }
+    }
+}
+
+class HydraWidgetReceiver : GlanceAppWidgetReceiver() {
+    override val glanceAppWidget: GlanceAppWidget = HydraWidget()
+}
+
+@Composable
+private fun Small(d: WidgetData) {
+    Column(
+        modifier = GlanceModifier.fillMaxSize().padding(10.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Box(modifier = GlanceModifier.fillMaxWidth().defaultWeight(), contentAlignment = Alignment.Center) {
+            Ring(d)
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(
+                    "%,d".format(d.intakeMl),
+                    style = TextStyle(color = Ink, fontSize = 22.sp, fontWeight = FontWeight.Bold),
+                    maxLines = 1,
+                )
+                Text("of ${"%,d".format(d.goalMl)} ml", style = TextStyle(color = Soft, fontSize = 10.sp), maxLines = 1)
+            }
+        }
+        d.pace?.let {
+            Spacer(GlanceModifier.height(4.dp))
+            Text(
+                if (it.behind) "${it.text} pace" else it.text,
+                style = TextStyle(
+                    color = if (it.behind) WarnInk else GoodInk,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Medium,
+                ),
+                maxLines = 1,
+            )
+        }
+    }
+}
+
+@Composable
+private fun Wide(d: WidgetData) {
+    Row(
+        modifier = GlanceModifier.fillMaxSize().padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(modifier = GlanceModifier.width(112.dp).fillMaxHeight(), contentAlignment = Alignment.Center) {
+            Ring(d)
+            Text(
+                "${d.percent}%",
+                style = TextStyle(color = Ink, fontSize = 20.sp, fontWeight = FontWeight.Bold),
+                maxLines = 1,
+            )
+        }
+        Spacer(GlanceModifier.width(14.dp))
+        Column(modifier = GlanceModifier.defaultWeight()) {
+            Row(verticalAlignment = Alignment.Bottom) {
+                Text(
+                    "%,d".format(d.intakeMl),
+                    style = TextStyle(color = Ink, fontSize = 30.sp, fontWeight = FontWeight.Bold),
+                    maxLines = 1,
+                )
+                Text(" ml", style = TextStyle(color = Soft, fontSize = 14.sp), maxLines = 1)
+            }
+            Spacer(GlanceModifier.height(5.dp))
+            Row(modifier = GlanceModifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                d.pace?.let { Pill(it.text, warn = it.behind, good = !it.behind) }
+                Spacer(GlanceModifier.defaultWeight())
+                WidgetData.ageText(d.lastSyncMs)?.let {
+                    Text(it, style = TextStyle(color = Soft, fontSize = 11.sp), maxLines = 1)
+                }
+            }
+            if (d.batteryPercent != null || d.filterPercent != null) {
+                Spacer(GlanceModifier.height(5.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    d.batteryPercent?.let {
+                        Pill("$it%", warn = d.batteryLow, icon = R.drawable.ic_widget_battery, iconLabel = "Bottle battery")
+                        Spacer(GlanceModifier.width(6.dp))
+                    }
+                    d.filterPercent?.let {
+                        Pill("$it%", warn = d.filterLow, icon = R.drawable.ic_widget_filter, iconLabel = "Filter")
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun Pill(text: String, warn: Boolean, good: Boolean = false, icon: Int? = null, iconLabel: String? = null) {
+    val bg = when { warn -> WarnBg; good -> GoodBg; else -> PillBg }
+    val ink = when { warn -> WarnInk; good -> GoodInk; else -> PillInk }
+    Row(
+        modifier = GlanceModifier.background(bg).cornerRadius(14.dp).padding(horizontal = 9.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (icon != null) {
+            Image(
+                provider = ImageProvider(icon),
+                contentDescription = iconLabel,
+                colorFilter = ColorFilter.tint(ink),
+            )
+            Spacer(GlanceModifier.width(5.dp))
+        }
+        Text(text, style = TextStyle(color = ink, fontSize = 12.sp, fontWeight = FontWeight.Medium), maxLines = 1)
+    }
+}
+
+@Composable
+private fun Ring(d: WidgetData) {
+    Image(
+        provider = ImageProvider(ringBitmap(d.progress, if (d.progress < 1f) d.paceFraction else 0f)),
+        contentDescription = "${d.percent}% of today's goal",
+        modifier = GlanceModifier.fillMaxSize(),
+        contentScale = ContentScale.Fit,
+    )
+}
+
+/**
+ * The progress ring, drawn to a bitmap because widgets can't draw shapes. Its colours are
+ * chosen to work on both the light and the dark card, so it needn't be redrawn on a theme change.
+ * [pace] in (0, 1) adds the pace dot at that point round the ring.
+ */
+private fun ringBitmap(progress: Float, pace: Float): Bitmap {
+    val size = 360
+    val stroke = 30f
+    val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+    val canvas = Canvas(bitmap)
+    val inset = stroke / 2f + 12f
+    val rect = RectF(inset, inset, size - inset, size - inset)
+    val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeWidth = stroke
+        strokeCap = Paint.Cap.ROUND
+    }
+    paint.color = 0x338291AD
+    canvas.drawArc(rect, 0f, 360f, false, paint)
+    if (progress > 0f) {
+        paint.color = 0xFFFFFFFF.toInt()
+        paint.shader = LinearGradient(
+            0f, 0f, size.toFloat(), size.toFloat(), 0xFF3BB8EE.toInt(), 0xFF8A7AF5.toInt(), Shader.TileMode.CLAMP,
+        )
+        canvas.drawArc(rect, -90f, 360f * progress.coerceIn(0f, 1f), false, paint)
+        paint.shader = null
+    }
+    if (pace > 0f && pace < 1f) {
+        val angle = Math.toRadians((360.0 * pace) - 90.0)
+        val r = rect.width() / 2f
+        val cx = rect.centerX() + (r * cos(angle)).toFloat()
+        val cy = rect.centerY() + (r * sin(angle)).toFloat()
+        val dot = Paint(Paint.ANTI_ALIAS_FLAG)
+        dot.color = 0xFF0E1626.toInt()
+        canvas.drawCircle(cx, cy, 15f, dot)
+        dot.color = 0xFFFFFFFF.toInt()
+        canvas.drawCircle(cx, cy, 10f, dot)
+    }
+    return bitmap
+}

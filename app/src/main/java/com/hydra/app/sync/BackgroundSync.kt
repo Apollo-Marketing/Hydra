@@ -24,6 +24,7 @@ import com.hydra.app.filter.FilterReminder
 import com.hydra.app.health.HealthConnectController
 import com.hydra.app.notify.LowBatteryAlert
 import com.hydra.app.notify.PaceNudge
+import com.hydra.app.widget.HydraWidget
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
@@ -148,8 +149,10 @@ class BottleSyncWorker(context: Context, params: WorkerParameters) : CoroutineWo
         return done("synced")
     }
 
-    private fun done(why: String): Result {
+    private suspend fun done(why: String): Result {
         Log.i(TAG, "background sync: $why")
+        // Redraw the widget either way: new data if we synced, a fresh pace and age if not.
+        HydraWidget.refresh(applicationContext)
         return Result.success()
     }
 

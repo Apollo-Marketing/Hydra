@@ -1,3 +1,4 @@
 <resources>
     <string name="app_name">Hydra</string>
+    <string name="widget_description">Today\'s water, pace, bottle battery and filter</string>
 </resources>

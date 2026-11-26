@@ -1,5 +1,6 @@
 package com.hydra.app.ui
 
+import com.hydra.app.widget.HydraWidget
 import com.hydra.app.notify.LowBatteryAlert
 import com.hydra.app.sync.AppForeground
 import com.hydra.app.sync.BackgroundSync
@@ -200,6 +201,21 @@ fun MainScreen() {
                 LowBatteryAlert.onReading(context, percent)
             }
         }
+    }
+
+    // Keep the home-screen widget in step with everything it shows.
+    LaunchedEffect(connection, filterRepo) {
+        combine(
+            connection.sipLog,
+            prefs.dailyGoalMl,
+            prefs.lastBatteryAtMs,
+            prefs.lastSyncMs,
+            combine(prefs.wakeSec, prefs.bedSec, filterRepo.observeActive()) { _, _, _ -> },
+        ) { _, _, _, _, _ -> }
+            .collectLatest {
+                delay(500L)
+                HydraWidget.refresh(context)
+            }
     }
 
     DisposableEffect(connection) {
