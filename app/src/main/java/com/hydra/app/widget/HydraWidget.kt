@@ -93,10 +93,10 @@ private fun paletteFor(forceDark: Boolean?): Palette {
         soft = pick(0xFF4A5A73, 0xFFC3CFE2),
         pillBg = pick(0x1A0F1A2B, 0x2EFFFFFF),
         pillInk = pick(0xFF26344A, 0xFFF2F6FC),
-        warnBg = pick(0xFFFBEED6, 0x52FFB03A),
-        warnInk = pick(0xFF7A4600, 0xFFFFDCA0),
-        goodBg = pick(0xFFDDF3E8, 0x4D4FE0A0),
-        goodInk = pick(0xFF0B6B47, 0xFFB4F7D8),
+        warnBg = pick(0x38E08A00, 0x52FFB03A),
+        warnInk = pick(0xFF6B3D00, 0xFFFFDCA0),
+        goodBg = pick(0x2E18A56B, 0x4D4FE0A0),
+        goodInk = pick(0xFF075C3C, 0xFFB4F7D8),
     )
 }
 
