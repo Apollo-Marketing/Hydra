@@ -532,3 +532,36 @@ Verify a signed APK:
 6. Verify the new release at https://github.com/Apollo-Marketing/Hydra/releases — `Hydra-X.Y.Z.apk` should be attached and signed.
 
 The in-app updater (slices 2-5) will pick the new release up on next app launch on each user's phone.
+
+---
+
+## 10. Session notes — v1.2.0 (2026-11-24/25)
+
+Released as `v1.2.0`. `CLAUDE.md` is the up-to-date map; this section records what was learned and what is still open.
+
+### 10.1 What shipped
+
+- **Dev app:** debug builds install as `com.hydra.app.dev` ("Hydra Dev") alongside production.
+- **Sync:** one `ResponseGetCapTofLog` notification carries up to 7 entries (the parser used to read only the first, making sync ~7× slower); manual sips no longer advance the bottle sync cursor.
+- **Filter tracking:** type (Essential 94 L / Advanced 151 L), health = lower of volume gauge and 60-day age gauge, temporary removal, replacement reminder. App-side only — the bottle has no filter concept and the filter does not affect level readings.
+- **Intake rules:** `BottleMath.levelEvents` follows the official `BottleVolumeAlgo` (decompiled `nc.a`): drink > 25 mL below the reference level, refill > 200 mL rise, readings ≥ TOF max ignored.
+- **History:** Day / Week / Month, arrows and swipe.
+- **Bottle commands:** Clean / Stop (`RequestSetCapUvActivate`), Measure (`RequestGetCapTofState`, ~3 s), last cleaned (`RequestGetCapActivationLog`), auto power-saving-off (`RequestSetCapPowerSavingMode`), quiet hours (`RequestSetCapDoNotDisturbSettings`).
+- **Your day:** wake-up / bedtime drive the day rollover, the pace notch on the Today ring, and the bottle's quiet hours.
+- **Background sync:** hourly WorkManager check-in (`sync/BackgroundSync.kt`); the screen releases the bottle 30 s after backgrounding.
+
+### 10.2 What every read-only request returned on the paired bottle
+
+All 20 `Get*` requests answer. Low battery: alert 20 %, lockout 5 %. TOF settings: mode 2 (event), interval 1200 s, bottle 1000 mL, accelerometer timeout 180 s. Hydration reminder: adaptive, 1800 s interval. UV config (duration s, power %): maintenance 3/80, standard 20/80, adventure 180/100 — the duration/power reading is an interpretation. Activation log: a maintenance cycle roughly every 2 h, entries `{timestamp, mode, battery %}`. Fault log: one `TYPE_AMBIENT_LIGHT` on 2026-11-07. State log and the two ADC logs are undecoded. The UI state always reported power saving OFF.
+
+Log requests (`ActivationLog`, `FaultLog`, `StateLog`, ADC logs) take the same `CapLogQuery` payload as the TOF log.
+
+### 10.3 Open items
+
+- **Unverified on device at release time:** the pace notch drawing, the hourly schedule firing unprompted, the v3→v4 migration on production data, the filter's alarm-driven reminder.
+- **Freeze risk:** a background check-in that is not backed by a running job can be frozen by Android mid-connection, holding the bottle until the next run or app open. Seen once, after a reinstall mid-test. The fix would be running the worker as foreground/expedited work.
+- **Hydra and Hydra Dev both run background sync** and contend for the bottle; turn it off in whichever is not in use.
+- `git push` from this machine fails with the keychain's `jp-29235` login; pushes were made with `git -c credential.helper= -c 'credential.helper=!gh auth git-credential' push …` (the `gh` CLI is signed in as `Apollo-Marketing`).
+- The release workflow warns that `actions/setup-java@v4` is deprecated.
+- Not built: Health Connect sleep import for wake/bed times, home screen widget, "behind pace" notifications, fault display, UV history list, export/backup, reading the bottle size from the bottle, hydration-reminder editing.
+- Debug aid: `adb shell am start --activity-clear-task -n com.hydra.app.dev/com.hydra.app.MainActivity --ez bgsync_test true` queues one background check-in 45 s later (`adb logcat -s HydraBgSync`).

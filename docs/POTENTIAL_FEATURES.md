@@ -9,6 +9,8 @@ A working catalogue of features we could build given what we now know about the 
 
 ---
 
+> **Status as of v1.2.0 (2026-11-25):** shipped since this list was written — #1 exact intake math (using the official app's bundled thresholds), #3 wake (automatic, no button), #4 Clean now, #6 firmware/serial, #7–#10 and #12 (ring, charts, heatmap, refills, manual sips), #15 background sync, #20 clock check (probed), G3 power-saving payload; #11 is partly done (quiet hours only); #19 shows last cleaned only. Also shipped but never on this list: filter tracking, Day/Week/Month history, Measure, wake/bed "Your day", pace. See `PROJECT_HANDOFF.md` §10.
+
 ## Already shipped (foundation)
 
 These are in code today — listed so we don't duplicate.
