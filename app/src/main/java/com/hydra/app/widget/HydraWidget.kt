@@ -20,6 +20,7 @@ import androidx.glance.GlanceId
 import androidx.glance.GlanceModifier
 import androidx.glance.Image
 import androidx.glance.ImageProvider
+import androidx.glance.LocalContext
 import androidx.glance.LocalSize
 import androidx.glance.action.actionStartActivity
 import androidx.glance.action.clickable
@@ -68,10 +69,13 @@ private fun pick(day: Long, night: Long): androidx.glance.unit.ColorProvider = w
     null -> ColorProvider(day = Color(day), night = Color(night))
 }
 
-private val Card get() = pick(0xFFFFFFFF, 0xFF0E1626)
+// Glass card: a see-through tint the wallpaper shows through, with a soft sheen and a bright
+// rim drawn on top (see glassBitmap). Android can't blur what is behind a widget, so the tint
+// stays opaque enough for the text to remain readable on a busy wallpaper.
+private val Card get() = pick(0xA6FFFFFF, 0x8C0B1322)
 private val Ink get() = pick(0xFF0F1A2B, 0xFFF2F6FC)
 private val Soft get() = pick(0xFF4A5A73, 0xFFA9B8D0)
-private val PillBg get() = pick(0xFFEEF2F8, 0xFF18233A)
+private val PillBg get() = pick(0x1A0F1A2B, 0x29FFFFFF)
 private val PillInk get() = pick(0xFF26344A, 0xFFD5DEEC)
 private val WarnBg get() = pick(0xFFFBEED6, 0xFF3A2C12)
 private val WarnInk get() = pick(0xFF7A4600, 0xFFFFC46B)
@@ -97,14 +101,21 @@ open class HydraWidget : GlanceAppWidget() {
             forceDark = data?.forceDark
             val size = LocalSize.current
             val wide = size.width >= WIDE_MIN_WIDTH && size.width.value >= size.height.value * 1.4f
+            val density = LocalContext.current.resources.displayMetrics.density
             Box(
                 modifier = GlanceModifier
                     .fillMaxSize()
                     .background(Card)
-                    .cornerRadius(26.dp)
+                    .cornerRadius(CORNER_DP.dp)
                     .clickable(actionStartActivity<MainActivity>()),
                 contentAlignment = Alignment.Center,
             ) {
+                Image(
+                    provider = ImageProvider(glassBitmap(size, density)),
+                    contentDescription = null,
+                    modifier = GlanceModifier.fillMaxSize(),
+                    contentScale = ContentScale.FillBounds,
+                )
                 val d = data
                 when {
                     d == null -> Text("Open Hydra", style = TextStyle(color = Soft, fontSize = 13.sp))
@@ -286,6 +297,45 @@ private fun Ring(d: WidgetData) {
     )
 }
 
+private const val CORNER_DP = 26f
+
+/**
+ * The glass finish laid over the card's tint: a diagonal sheen that is brightest at the top
+ * left, and a thin rim that is bright along the top edge and fades down the sides, as light
+ * catches the edge of a pane. White only, so it suits the light and the dark card alike.
+ */
+private fun glassBitmap(size: DpSize, density: Float): Bitmap {
+    val scale = density * 0.75f // a little under full resolution keeps the bitmap small
+    val w = (size.width.value * scale).toInt().coerceIn(64, 1400)
+    val h = (size.height.value * scale).toInt().coerceIn(64, 1400)
+    val radius = CORNER_DP * scale
+    val bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+    val canvas = Canvas(bitmap)
+    val full = RectF(0f, 0f, w.toFloat(), h.toFloat())
+
+    val sheen = Paint(Paint.ANTI_ALIAS_FLAG)
+    sheen.shader = LinearGradient(
+        0f, 0f, w * 0.75f, h.toFloat(),
+        intArrayOf(0x38FFFFFF, 0x0FFFFFFF, 0x00FFFFFF), floatArrayOf(0f, 0.45f, 1f), Shader.TileMode.CLAMP,
+    )
+    canvas.drawRoundRect(full, radius, radius, sheen)
+
+    val rimWidth = 1.4f * scale
+    val rim = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeWidth = rimWidth
+        shader = LinearGradient(
+            0f, 0f, 0f, h.toFloat(),
+            intArrayOf(0xB3FFFFFF.toInt(), 0x33FFFFFF, 0x1FFFFFFF), floatArrayOf(0f, 0.5f, 1f), Shader.TileMode.CLAMP,
+        )
+    }
+    val inset = rimWidth / 2f
+    canvas.drawRoundRect(
+        RectF(inset, inset, w - inset, h - inset), radius - inset, radius - inset, rim,
+    )
+    return bitmap
+}
+
 /**
  * The progress ring, drawn to a bitmap because widgets can't draw shapes. Its colours are
  * chosen to work on both the light and the dark card, so it needn't be redrawn on a theme change.
@@ -303,7 +353,7 @@ private fun ringBitmap(progress: Float, pace: Float): Bitmap {
         strokeWidth = stroke
         strokeCap = Paint.Cap.ROUND
     }
-    paint.color = 0x338291AD
+    paint.color = 0x4D8291AD
     canvas.drawArc(rect, 0f, 360f, false, paint)
     if (progress > 0f) {
         paint.color = 0xFFFFFFFF.toInt()
