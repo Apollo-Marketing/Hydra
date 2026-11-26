@@ -15,6 +15,8 @@ val Warn = Color(0xFFFF9C5C)
 val Ok = Color(0xFF7BE4A8)
 /** A day that reached its goal: the fill for calendar cells and chart bars, in both themes. */
 val Goal = Color(0xFF34C985)
+/** Second stop for the goal-reached ring, so it keeps a gradient like the everyday ring. */
+val GoalDeep = Color(0xFF12A7A0)
 
 /** Goal green for text and small marks, dark enough to read on the light theme. */
 val HydraColors.goalInk: Color get() = if (isDark) Ok else Color(0xFF0E8A52)

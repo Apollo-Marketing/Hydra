@@ -377,7 +377,11 @@ private fun ringBitmap(progress: Float, pace: Float): Bitmap {
     if (progress > 0f) {
         paint.color = 0xFFFFFFFF.toInt()
         paint.shader = LinearGradient(
-            0f, 0f, size.toFloat(), size.toFloat(), 0xFF3BB8EE.toInt(), 0xFF8A7AF5.toInt(), Shader.TileMode.CLAMP,
+            0f, 0f, size.toFloat(), size.toFloat(),
+            // Green once the goal is reached, matching the app.
+            if (progress >= 1f) 0xFF34C985.toInt() else 0xFF3BB8EE.toInt(),
+            if (progress >= 1f) 0xFF12A7A0.toInt() else 0xFF8A7AF5.toInt(),
+            Shader.TileMode.CLAMP,
         )
         canvas.drawArc(rect, -90f, 360f * progress.coerceIn(0f, 1f), false, paint)
         paint.shader = null

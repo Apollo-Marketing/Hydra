@@ -175,6 +175,7 @@ fun HydrationScreen(
             HydrationRing(
                 progress = ringProgress,
                 paceFraction = if (showPace && !goalReached) paceFraction else null,
+                goalReached = goalReached,
             ) {
                 HydrationRingCenter(
                     eyebrow = "Today",

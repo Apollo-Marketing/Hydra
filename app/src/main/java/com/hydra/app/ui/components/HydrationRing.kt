@@ -26,6 +26,8 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.hydra.app.ui.theme.Cyan
+import com.hydra.app.ui.theme.Goal
+import com.hydra.app.ui.theme.GoalDeep
 import com.hydra.app.ui.theme.LocalHydraColors
 import com.hydra.app.ui.theme.Violet
 
@@ -42,6 +44,8 @@ fun HydrationRing(
     strokeWidth: Dp = 12.dp,
     /** Where on the ring (0..1) the user should be by now; draws a notch there. Null hides it. */
     paceFraction: Float? = null,
+    /** Draws the arc in the goal green once the day's goal is reached. */
+    goalReached: Boolean = false,
     centerContent: @Composable () -> Unit,
 ) {
     val colors = LocalHydraColors.current
@@ -68,7 +72,7 @@ fun HydrationRing(
             )
             if (animated > 0f) {
                 val gradient = Brush.linearGradient(
-                    colors = listOf(Cyan, Violet),
+                    colors = if (goalReached) listOf(Goal, GoalDeep) else listOf(Cyan, Violet),
                     start = Offset(0f, 0f),
                     end = Offset(this.size.width, this.size.height),
                 )
