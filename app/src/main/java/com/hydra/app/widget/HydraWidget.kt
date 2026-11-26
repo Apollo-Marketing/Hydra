@@ -176,15 +176,6 @@ private fun Small(d: WidgetData, k: Float) {
 @Composable
 private fun Wide(d: WidgetData, k: Float) {
     val pillFont = maxOf(12f, 19 * k)
-    // How fresh the data is, tucked into the bottom corner of the card, out of the way.
-    WidgetData.ageText(d.lastSyncMs)?.let {
-        Box(
-            modifier = GlanceModifier.fillMaxSize().padding(end = (42 * k).dp, bottom = (22 * k).dp),
-            contentAlignment = Alignment.BottomEnd,
-        ) {
-            Text(it, style = TextStyle(color = Soft, fontSize = maxOf(11f, 16 * k).sp), maxLines = 1)
-        }
-    }
     Row(
         modifier = GlanceModifier.fillMaxSize().padding(horizontal = (42 * k).dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -221,6 +212,16 @@ private fun Wide(d: WidgetData, k: Float) {
                         Pill("$it%", pillFont, k, warn = d.filterLow, icon = R.drawable.ic_widget_filter, iconLabel = "Filter")
                     }
                 }
+            }
+            // How fresh the data is: last line, lined up with the pills above it.
+            WidgetData.ageText(d.lastSyncMs)?.let {
+                Spacer(GlanceModifier.height((12 * k).dp))
+                Text(
+                    it,
+                    modifier = GlanceModifier.padding(start = (pillFont * 0.4f).dp),
+                    style = TextStyle(color = Soft, fontSize = maxOf(11f, 16 * k).sp),
+                    maxLines = 1,
+                )
             }
         }
     }
