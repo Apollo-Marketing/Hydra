@@ -51,6 +51,12 @@ app/src/main/java/com/hydra/app/
 │   └── FilterReminder.kt   # replacement notification + age-milestone alarms + receiver
 ├── sync/                   # Background sync
 │   └── BackgroundSync.kt   # AppForeground flag, hourly WorkManager schedule, BottleSyncWorker (own short-lived BottleConnection)
+├── notify/                 # Opt-in notifications
+│   └── HydraNotifications.kt  # shared post/permission/sleep-hours check; LowBatteryAlert (≤20%, daily until charged past 25%);
+│                           # PaceNudge (after each background check-in; ≥15% of goal behind, 2 h apart, not near wake-up or bedtime)
+├── widget/                 # Home-screen widget (Glance)
+│   ├── HydraWidget.kt      # one widget, two picker entries (small 2×2 / wide 4×2); layout scaled from the mockup's units to the real size
+│   └── WidgetData.kt       # what it shows, read from stored data only (never talks to the bottle); pace wording + sync age
 ├── health/                 # Health Connect bridge — write-only sync of sip data
 │   ├── HealthConnectAvailability.kt   # sealed Available/NotInstalled/UpdateRequired/Unsupported
 │   ├── HealthConnectGateway.kt        # SOLE point of contact with androidx.health.connect.client.*
@@ -84,6 +90,10 @@ app/src/main/java/com/hydra/app/
 - Quiet-hours (do-not-disturb) times are seconds since midnight **UTC**, with 86400 for midnight — convert with `BottleClock`. Quiet hours always equal the sleep hours from Settings → Your day (bedtime → wake-up); `MainScreen` rewrites them whenever the bottle's window is on but doesn't match, which also corrects DST shifts.
 - The logical day rolls over at `BottleMath.dayResetSec`, a process-wide value `MainScreen` sets from the user's wake-up/bedtime (`DaySchedule`, Settings → Your day): the middle of the night's sleep, rounded down to the hour (default 3 am). Pace on the Today ring runs from wake-up to two hours before bedtime.
 - Only one connection to the bottle can exist. The screen's `BottleConnection` is held only while the app is in front (dropped 30 s after backgrounding); in the background the hourly `BottleSyncWorker` makes its own brief connection and skips or aborts if the app is open. Hydra and Hydra Dev both run this, so they can contend for the bottle.
+- The cap answers each `RequestGetCapTofLog` with one notification of at most 7 entries (`SIP_ENTRIES_PER_REPLY`), whatever page size is asked for. A full reply triggers the next request immediately; a short or missing reply ends the sync via the quiet timer. A full two-month download takes about 50 s.
+- `MainActivity` is `singleTop`. Two copies of the screen mean two `BottleConnection`s syncing at once.
+- The last battery reading is stored in prefs with its time (shown on the Bottle tab and widget while disconnected). `HydraWidget.refresh(context)` must be called when anything the widget shows changes; `MainScreen` and `BottleSyncWorker` do.
+- Reminders (low battery, filter) repeat until resolved and are never posted during sleep hours (`DaySchedule.isAsleep`).
 - Intake everywhere comes from `BottleMath.levelEvents`: a drink counts once the level is >25 mL below the level at the last drink/refill; a rise >200 mL is a refill; readings at or beyond the TOF max (270 mm for 1000 mL) are ignored.
 
 ## Reference Docs
@@ -95,7 +105,7 @@ app/src/main/java/com/hydra/app/
 
 - **Never hardcode a BLE MAC.** Always scan by name (RPAs rotate every ~15 min on this bottle).
 - **Never delete the `captures/` directory.** It contains the bugreport snoop log + decompiled APK that all protocol decoding depends on.
-- **Build verifies via `./gradlew assembleDebug` with `JAVA_HOME` set.** Unit tests live in `app/src/test` (protocol parsing, level events, filter math, pace, bottle clock) — run `./gradlew testDebugUnitTest`.
+- **Build verifies via `./gradlew assembleDebug` with `JAVA_HOME` set.** Unit tests live in `app/src/test` (protocol parsing, level events, filter math, pace, bottle clock, pace nudge, widget wording) — run `./gradlew testDebugUnitTest`.
 - **BLE parsing must be crash-safe.** Wrap any new parser in `runCatching` and bound-check fixed32 reads. The notification thread is a binder thread; throws crash the process.
 - **Database schema changes bump version + add a real `Migration`.** Additive changes (new tables/columns) must migrate so sip history, manual sips, filters and pairing survive an update — see `MIGRATION_3_4`. The destructive fallback stays only as a last resort for versions with no migration path; the bottle's buffer only reaches back a few months and manual sips and filter state are not on the bottle at all.
 - **Vercel/Next.js validator hooks fire on this Android project's `app/` directory.** They're false positives — ignore them.
