@@ -31,8 +31,8 @@ android {
         targetSdk = 36
         // versionCode follows UpdateChecker.parseVersionCode: major*10000 + minor*100 + patch.
         // Must stay in lock-step with the git tag (v1.0.0 → 10000, v1.0.1 → 10001).
-        versionCode = 10200
-        versionName = "1.2.0"
+        versionCode = 10300
+        versionName = "1.3.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
