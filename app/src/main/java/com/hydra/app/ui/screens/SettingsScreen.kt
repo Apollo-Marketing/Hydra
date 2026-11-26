@@ -1,5 +1,8 @@
 package com.hydra.app.ui.screens
 
+import android.os.Build
+import com.hydra.app.notify.HydraNotifications
+import com.hydra.app.notify.LowBatteryAlert
 import com.hydra.app.ble.BottleMath
 import com.hydra.app.ble.BottleClock
 import com.hydra.app.ble.BottleConnection
@@ -227,6 +230,8 @@ fun SettingsScreen(connection: BottleConnection, modifier: Modifier = Modifier) 
 
         QuietHoursGroup(connection, prefs)
 
+        NotificationsGroup(prefs)
+
         SettingsGroup(title = "Display") {
             SettingsRow(
                 label = "Theme",
@@ -362,7 +367,7 @@ fun SettingsScreen(connection: BottleConnection, modifier: Modifier = Modifier) 
             text = { Text("\"${bottle.name}\" will be removed from your saved bottles. You can pair it again any time.") },
             confirmButton = {
                 TextButton(onClick = {
-                    scope.launch { savedRepo.remove(bottle.name) }
+                    scope.launch { savedRepo.remove(bottle.name); prefs.clearLastBattery() }
                     pendingRemove = null
                 }) { Text("Remove", color = Cyan) }
             },
@@ -579,6 +584,69 @@ private fun QuietHoursGroup(connection: BottleConnection, prefs: AppPreferencesR
                     }
                 }
             },
+        )
+    }
+}
+
+/** Opt-in notifications. Turning the first one on asks for Android's notification permission. */
+@Composable
+private fun NotificationsGroup(prefs: AppPreferencesRepository) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val nudgeOn by prefs.paceNudgeEnabled.collectAsState(initial = false)
+    val batteryOn by prefs.lowBatteryAlertEnabled.collectAsState(initial = false)
+    val filterOn by prefs.filterReminderEnabled.collectAsState(initial = false)
+    val backgroundSyncOn by prefs.backgroundSyncEnabled.collectAsState(initial = true)
+    var pending by remember { mutableStateOf<String?>(null) }
+
+    fun set(which: String, value: Boolean) {
+        scope.launch {
+            when (which) {
+                "nudge" -> prefs.setPaceNudgeEnabled(value)
+                "battery" -> prefs.setLowBatteryAlertEnabled(value)
+                "filter" -> prefs.setFilterReminderEnabled(value)
+            }
+        }
+    }
+    val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) pending?.let { set(it, true) }
+        pending = null
+    }
+    fun toggle(which: String, on: Boolean) {
+        when {
+            on -> set(which, false)
+            HydraNotifications.hasPermission(context) -> set(which, true)
+            Build.VERSION.SDK_INT >= 33 -> {
+                pending = which
+                permission.launch(Manifest.permission.POST_NOTIFICATIONS)
+            }
+        }
+    }
+    fun end(on: Boolean) = if (on) RowEnd.ToggleOn else RowEnd.ToggleOff
+
+    SettingsGroup(title = "Notifications") {
+        SettingsRow(
+            label = "Drink reminder",
+            value = if (backgroundSyncOn) {
+                "When you're well behind pace for the day"
+            } else {
+                "Needs Background sync turned on"
+            },
+            end = end(nudgeOn),
+            onClick = { toggle("nudge", nudgeOn) },
+        )
+        SettingsRow(
+            label = "Low bottle battery",
+            value = "When the bottle drops to ${LowBatteryAlert.ALERT_PERCENT}%",
+            end = end(batteryOn),
+            onClick = { toggle("battery", batteryOn) },
+        )
+        SettingsRow(
+            label = "Filter replacement",
+            value = "When the filter needs replacing",
+            end = end(filterOn),
+            last = true,
+            onClick = { toggle("filter", filterOn) },
         )
     }
 }

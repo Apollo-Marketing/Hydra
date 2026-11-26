@@ -165,6 +165,10 @@ class BottleConnection(
     private val _battery = MutableStateFlow<Int?>(null)
     val battery: StateFlow<Int?> = _battery.asStateFlow()
 
+    /** When [battery] was last read from the bottle by this connection; 0 if it hasn't been. */
+    private val _batteryReadAtMs = MutableStateFlow(0L)
+    val batteryReadAtMs: StateFlow<Long> = _batteryReadAtMs.asStateFlow()
+
     /** Device Information strings keyed by name ("Model", "Serial", "Firmware rev", …). */
     private val _deviceInfo = MutableStateFlow<Map<String, String>>(emptyMap())
     val deviceInfo: StateFlow<Map<String, String>> = _deviceInfo.asStateFlow()
@@ -493,6 +497,7 @@ class BottleConnection(
         }
         if (c.uuid == BottleConfig.BATTERY_LEVEL) {
             _battery.value = value.getOrNull(0)?.let { it.toInt() and 0xFF }
+            if (_battery.value != null) _batteryReadAtMs.value = System.currentTimeMillis()
         } else {
             _deviceInfo.value = _deviceInfo.value + (name to parsed)
         }

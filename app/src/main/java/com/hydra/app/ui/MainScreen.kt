@@ -1,5 +1,6 @@
 package com.hydra.app.ui
 
+import com.hydra.app.notify.LowBatteryAlert
 import com.hydra.app.sync.AppForeground
 import com.hydra.app.sync.BackgroundSync
 import com.hydra.app.ble.DoNotDisturbState
@@ -187,6 +188,18 @@ fun MainScreen() {
                 FilterReminder.schedule(context)
                 FilterReminder.check(context)
             }
+    }
+
+    // Remember each battery reading so it can still be shown (with its age) while the bottle
+    // isn't connected, and raise the low-battery alert if it applies.
+    LaunchedEffect(connection) {
+        connection.batteryReadAtMs.collect { at ->
+            val percent = connection.battery.value
+            if (at > 0L && percent != null) {
+                prefs.setLastBattery(percent, at)
+                LowBatteryAlert.onReading(context, percent)
+            }
+        }
     }
 
     DisposableEffect(connection) {

@@ -1,5 +1,7 @@
 package com.hydra.app
 
+import com.hydra.app.notify.LowBatteryAlert
+import com.hydra.app.notify.PaceNudge
 import com.hydra.app.sync.BackgroundSync
 import com.hydra.app.sync.AppForeground
 import android.content.Intent
@@ -46,6 +48,11 @@ class MainActivity : ComponentActivity() {
         val launchedForHealthConnectRationale = intent.isHealthConnectRationale()
         if (BuildConfig.DEBUG && intent?.getBooleanExtra("bgsync_test", false) == true) {
             BackgroundSync.runOnceForTesting(this)
+        }
+        // Dev aid: `--ez notify_test true` posts a sample of each notification.
+        if (BuildConfig.DEBUG && intent?.getBooleanExtra("notify_test", false) == true) {
+            PaceNudge.postNudge(this, 400, 600, 2000)
+            LowBatteryAlert.postAlert(this, 18)
         }
         setContent {
             val mode by prefs.themeMode.collectAsState(initial = ThemeMode.System)

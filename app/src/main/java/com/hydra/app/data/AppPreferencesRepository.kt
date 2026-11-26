@@ -41,6 +41,29 @@ class AppPreferencesRepository private constructor(context: Context) {
     suspend fun setBackgroundSyncEnabled(value: Boolean) { store.edit { it[KEY_BG_SYNC_ENABLED] = value } }
     suspend fun setLastBackgroundSync(ms: Long) { store.edit { it[KEY_LAST_BG_SYNC_MS] = ms } }
 
+    /** Last battery level read from the bottle (null if never) and when, so it can be shown while disconnected. */
+    val lastBatteryPercent: Flow<Int?> = store.data.map { it[KEY_LAST_BATTERY] }
+    val lastBatteryAtMs: Flow<Long> = store.data.map { it[KEY_LAST_BATTERY_AT_MS] ?: 0L }
+
+    suspend fun setLastBattery(percent: Int, atMs: Long) {
+        store.edit { it[KEY_LAST_BATTERY] = percent; it[KEY_LAST_BATTERY_AT_MS] = atMs }
+    }
+    suspend fun clearLastBattery() {
+        store.edit { it.remove(KEY_LAST_BATTERY); it.remove(KEY_LAST_BATTERY_AT_MS); it.remove(KEY_LOW_BATTERY_NOTIFIED) }
+    }
+
+    /** Notifications (see `notify/HydraNotifications.kt`). Both are opt-in. */
+    val paceNudgeEnabled: Flow<Boolean> = store.data.map { it[KEY_PACE_NUDGE] ?: false }
+    val lastPaceNudgeMs: Flow<Long> = store.data.map { it[KEY_LAST_PACE_NUDGE_MS] ?: 0L }
+    val lowBatteryAlertEnabled: Flow<Boolean> = store.data.map { it[KEY_LOW_BATTERY_ALERT] ?: false }
+    /** True once the low-battery alert has fired, until the bottle is charged again. */
+    val lowBatteryNotified: Flow<Boolean> = store.data.map { it[KEY_LOW_BATTERY_NOTIFIED] ?: false }
+
+    suspend fun setPaceNudgeEnabled(value: Boolean) { store.edit { it[KEY_PACE_NUDGE] = value } }
+    suspend fun setLastPaceNudge(ms: Long) { store.edit { it[KEY_LAST_PACE_NUDGE_MS] = ms } }
+    suspend fun setLowBatteryAlertEnabled(value: Boolean) { store.edit { it[KEY_LOW_BATTERY_ALERT] = value } }
+    suspend fun setLowBatteryNotified(value: Boolean) { store.edit { it[KEY_LOW_BATTERY_NOTIFIED] = value } }
+
     val showStreak: Flow<Boolean> = store.data.map { it[KEY_SHOW_STREAK] ?: true }
     val lastUpdateCheckMs: Flow<Long> = store.data.map { it[KEY_LAST_UPDATE_CHECK_MS] ?: 0L }
     val autoUpdateEnabled: Flow<Boolean> = store.data.map { it[KEY_AUTO_UPDATE_ENABLED] ?: true }
@@ -106,6 +129,12 @@ class AppPreferencesRepository private constructor(context: Context) {
         private val KEY_BED_SEC: Preferences.Key<Int> = intPreferencesKey("bed_sec")
         private val KEY_BG_SYNC_ENABLED: Preferences.Key<Boolean> = booleanPreferencesKey("bg_sync_enabled")
         private val KEY_LAST_BG_SYNC_MS: Preferences.Key<Long> = longPreferencesKey("last_bg_sync_ms")
+        private val KEY_LAST_BATTERY: Preferences.Key<Int> = intPreferencesKey("last_battery_percent")
+        private val KEY_LAST_BATTERY_AT_MS: Preferences.Key<Long> = longPreferencesKey("last_battery_at_ms")
+        private val KEY_PACE_NUDGE: Preferences.Key<Boolean> = booleanPreferencesKey("pace_nudge_enabled")
+        private val KEY_LAST_PACE_NUDGE_MS: Preferences.Key<Long> = longPreferencesKey("last_pace_nudge_ms")
+        private val KEY_LOW_BATTERY_ALERT: Preferences.Key<Boolean> = booleanPreferencesKey("low_battery_alert_enabled")
+        private val KEY_LOW_BATTERY_NOTIFIED: Preferences.Key<Boolean> = booleanPreferencesKey("low_battery_notified")
         private val KEY_SHOW_STREAK: Preferences.Key<Boolean> = booleanPreferencesKey("show_streak")
         private val KEY_LAST_UPDATE_CHECK_MS: Preferences.Key<Long> = longPreferencesKey("last_update_check_ms")
         private val KEY_AUTO_UPDATE_ENABLED: Preferences.Key<Boolean> = booleanPreferencesKey("auto_update_enabled")

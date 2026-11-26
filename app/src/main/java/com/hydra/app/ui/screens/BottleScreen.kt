@@ -95,7 +95,12 @@ fun BottleScreen(connection: BottleConnection, modifier: Modifier = Modifier) {
     val syncState by connection.syncState.collectAsState()
 
     // Battery and device details are read by the connection (one at a time, after each sync).
-    val battery by connection.battery.collectAsState()
+    // While disconnected, fall back to the last level that was read, and say how old it is.
+    val liveBattery by connection.battery.collectAsState()
+    val savedBattery by prefs.lastBatteryPercent.collectAsState(initial = null)
+    val batteryAtMs by prefs.lastBatteryAtMs.collectAsState(initial = 0L)
+    val battery = liveBattery ?: savedBattery
+    val batteryAge = rememberRelativeTime(batteryAtMs)
     val info by connection.deviceInfo.collectAsState()
     val deviceInfo = DeviceInfo(
         manufacturer = info["Manufacturer"].orEmpty(),
@@ -219,6 +224,13 @@ fun BottleScreen(connection: BottleConnection, modifier: Modifier = Modifier) {
                     refillCount = refills.count,
                     refillTotalMl = refills.totalMl.roundToInt(),
                 )
+                if (battery != null && batteryAtMs > 0L) {
+                    Text(
+                        "Battery measured $batteryAge",
+                        color = colors.inkSoft,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
             }
         }
 

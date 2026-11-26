@@ -22,6 +22,8 @@ import com.hydra.app.data.SavedBottlesRepository
 import com.hydra.app.data.SipRepository
 import com.hydra.app.filter.FilterReminder
 import com.hydra.app.health.HealthConnectController
+import com.hydra.app.notify.LowBatteryAlert
+import com.hydra.app.notify.PaceNudge
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
@@ -95,7 +97,7 @@ class BottleSyncWorker(context: Context, params: WorkerParameters) : CoroutineWo
         val prefs = AppPreferencesRepository.get(context)
 
         // BottleConnection expects to be driven from the main thread, like the UI does.
-        val synced = withContext(Dispatchers.Main) {
+        val outcome = withContext(Dispatchers.Main) {
             val connection = BottleConnection(context, sipRepo)
             try {
                 // Subscribe before connecting so the finish event can't be missed.
@@ -113,14 +115,19 @@ class BottleSyncWorker(context: Context, params: WorkerParameters) : CoroutineWo
                 }
                 val ok = finished.isCompleted
                 finished.cancel()
-                ok
+                if (ok) {
+                    // Battery level, for the "last known" display and the low-battery alert.
+                    connection.refreshBatteryAndInfo()
+                    withTimeoutOrNull(BATTERY_TIMEOUT_MS) { connection.batteryReadAtMs.first { it > 0L } }
+                }
+                Outcome(ok, connection.battery.value.takeIf { connection.batteryReadAtMs.value > 0L })
             } finally {
                 connection.stop()
                 delay(DISCONNECT_GRACE_MS)
                 connection.dispose()
             }
         }
-        if (!synced) return done("bottle not reached")
+        if (!outcome.synced) return done("bottle not reached")
 
         val now = System.currentTimeMillis()
         prefs.setLastSync(now)
@@ -131,6 +138,13 @@ class BottleSyncWorker(context: Context, params: WorkerParameters) : CoroutineWo
                 .onSipsChanged(sipRepo.observeAll().first(), BottleConfig.BOTTLE_SIZE_ML)
         }
         runCatching { FilterReminder.check(context) }
+        runCatching {
+            outcome.batteryPercent?.let {
+                prefs.setLastBattery(it, now)
+                LowBatteryAlert.onReading(context, it)
+            }
+        }
+        runCatching { PaceNudge.check(context) }
         return done("synced")
     }
 
@@ -144,7 +158,10 @@ class BottleSyncWorker(context: Context, params: WorkerParameters) : CoroutineWo
             ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
         }
 
+    private data class Outcome(val synced: Boolean, val batteryPercent: Int?)
+
     private companion object {
+        const val BATTERY_TIMEOUT_MS = 4_000L
         const val TAG = "HydraBgSync"
         const val RUN_TIMEOUT_MS = 45_000L
         const val DISCONNECT_GRACE_MS = 600L
