@@ -19,6 +19,7 @@ import com.hydra.app.ble.BottleConfig
 import com.hydra.app.data.AppPreferencesRepository
 import com.hydra.app.data.FilterRepository
 import com.hydra.app.data.HydraDatabase
+import com.hydra.app.notify.HydraNotifications
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -43,6 +44,9 @@ object FilterReminder {
     private const val NOTIFICATION_ID = 4101
     private const val REQUEST_SOON = 4102
     private const val REQUEST_NOW = 4103
+    private const val DAY_MS = 24 * 60 * 60 * 1000L
+    const val REPEAT_SOON_MS = 3 * DAY_MS
+    const val REPEAT_NOW_MS = DAY_MS
 
     fun hasNotificationPermission(context: Context): Boolean =
         Build.VERSION.SDK_INT < 33 ||
@@ -62,8 +66,15 @@ object FilterReminder {
         val health = FilterMath.health(active, sips, BottleConfig.BOTTLE_SIZE_ML)
         if (health.status == FilterStatus.Good) return
 
+        // Each stage notifies when first reached, then repeats until the filter is replaced:
+        // every few days while it is running low, daily once it is depleted. Never at night.
         val stamp = "${active.filter.id}:${health.status.name}"
-        if (prefs.filterLastNotified.first() == stamp) return
+        val nowMs = System.currentTimeMillis()
+        val repeatMs = if (health.status == FilterStatus.ReplaceNow) REPEAT_NOW_MS else REPEAT_SOON_MS
+        if (prefs.filterLastNotified.first() == stamp &&
+            nowMs - prefs.filterLastNotifiedMs.first() < repeatMs
+        ) return
+        if (HydraNotifications.isSleepTime(prefs)) return
 
         val type = FilterType.fromKey(active.filter.type)
         val (title, text) = when (health.status) {
@@ -73,7 +84,7 @@ object FilterReminder {
                 "Filter running low" to "Your ${type.label} filter is at ${health.percent}%. Plan to replace it soon."
         }
         post(app, title, text)
-        prefs.setFilterLastNotified(stamp)
+        prefs.setFilterLastNotified(stamp, nowMs)
         Log.d(TAG, "filter reminder posted: $stamp")
     }
 

@@ -31,6 +31,11 @@ object HydraNotifications {
             ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) ==
             PackageManager.PERMISSION_GRANTED
 
+    /** True during the sleep hours from Settings → Your day; reminders wait until morning. */
+    suspend fun isSleepTime(prefs: AppPreferencesRepository): Boolean =
+        BottleMath.DaySchedule(prefs.wakeSec.first(), prefs.bedSec.first())
+            .isAsleep(java.time.LocalTime.now().toSecondOfDay())
+
     fun post(context: Context, channelId: String, channelName: String, id: Int, title: String, text: String) {
         val manager = context.getSystemService(NotificationManager::class.java) ?: return
         manager.createNotificationChannel(
@@ -56,28 +61,33 @@ object HydraNotifications {
 }
 
 /**
- * "Charge your bottle" alert. Fires once when a battery reading is at or below
- * [ALERT_PERCENT] (the level at which the cap itself starts warning), and re-arms only
- * after a reading at or above [REARM_PERCENT], so a level hovering at the line can't repeat it.
+ * "Charge your bottle" alert. Fires when a battery reading is at or below [ALERT_PERCENT]
+ * (the level at which the cap itself starts warning) and repeats once a day while it stays
+ * low. A reading at or above [REARM_PERCENT] clears it, so the next drop alerts immediately.
+ * Never posted during sleep hours.
  */
 object LowBatteryAlert {
     const val ALERT_PERCENT = 20
     const val REARM_PERCENT = 25
+    const val REPEAT_MS = 24 * 60 * 60 * 1000L
     private const val CHANNEL_ID = "bottle_battery"
     private const val NOTIFICATION_ID = 4202
 
     suspend fun onReading(context: Context, percent: Int) {
         val app = context.applicationContext
         val prefs = AppPreferencesRepository.get(app)
-        val alreadyNotified = prefs.lowBatteryNotified.first()
+        val lastMs = prefs.lowBatteryNotifiedMs.first()
         if (percent >= REARM_PERCENT) {
-            if (alreadyNotified) prefs.setLowBatteryNotified(false)
+            if (lastMs != 0L) prefs.setLowBatteryNotifiedMs(0L)
             return
         }
-        if (percent > ALERT_PERCENT || alreadyNotified) return
+        if (percent > ALERT_PERCENT) return
+        val nowMs = System.currentTimeMillis()
+        if (nowMs - lastMs < REPEAT_MS) return
         if (!prefs.lowBatteryAlertEnabled.first() || !HydraNotifications.hasPermission(app)) return
+        if (HydraNotifications.isSleepTime(prefs)) return
         postAlert(app, percent)
-        prefs.setLowBatteryNotified(true)
+        prefs.setLowBatteryNotifiedMs(nowMs)
         Log.d(TAG, "low battery alert posted at $percent%")
     }
 

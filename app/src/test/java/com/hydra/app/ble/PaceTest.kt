@@ -54,3 +54,22 @@ class PaceTest {
         assertEquals(1f / 16f, BottleMath.paceFraction(at(25, 3), day), 0.001f)
     }
 }
+
+class SleepHoursTest {
+    private val schedule = BottleMath.DaySchedule(wakeSec = 9 * 3600, bedSec = 1 * 3600)
+
+    @org.junit.Test fun `asleep between bedtime and wake-up`() {
+        org.junit.Assert.assertTrue(schedule.isAsleep(1 * 3600))
+        org.junit.Assert.assertTrue(schedule.isAsleep(5 * 3600))
+        org.junit.Assert.assertFalse(schedule.isAsleep(9 * 3600))
+        org.junit.Assert.assertFalse(schedule.isAsleep(23 * 3600))
+        org.junit.Assert.assertFalse(schedule.isAsleep(0))
+    }
+
+    @org.junit.Test fun `sleep hours that cross midnight`() {
+        val early = BottleMath.DaySchedule(wakeSec = 7 * 3600, bedSec = 23 * 3600)
+        org.junit.Assert.assertTrue(early.isAsleep(23 * 3600 + 60))
+        org.junit.Assert.assertTrue(early.isAsleep(3 * 3600))
+        org.junit.Assert.assertFalse(early.isAsleep(12 * 3600))
+    }
+}

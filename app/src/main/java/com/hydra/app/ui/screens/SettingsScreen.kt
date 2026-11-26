@@ -637,13 +637,13 @@ private fun NotificationsGroup(prefs: AppPreferencesRepository) {
         )
         SettingsRow(
             label = "Low bottle battery",
-            value = "When the bottle drops to ${LowBatteryAlert.ALERT_PERCENT}%",
+            value = "At ${LowBatteryAlert.ALERT_PERCENT}% or lower, daily until charged",
             end = end(batteryOn),
             onClick = { toggle("battery", batteryOn) },
         )
         SettingsRow(
             label = "Filter replacement",
-            value = "When the filter needs replacing",
+            value = "Repeats until the filter is replaced",
             end = end(filterOn),
             last = true,
             onClick = { toggle("filter", filterOn) },

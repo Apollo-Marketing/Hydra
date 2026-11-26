@@ -56,13 +56,13 @@ class AppPreferencesRepository private constructor(context: Context) {
     val paceNudgeEnabled: Flow<Boolean> = store.data.map { it[KEY_PACE_NUDGE] ?: false }
     val lastPaceNudgeMs: Flow<Long> = store.data.map { it[KEY_LAST_PACE_NUDGE_MS] ?: 0L }
     val lowBatteryAlertEnabled: Flow<Boolean> = store.data.map { it[KEY_LOW_BATTERY_ALERT] ?: false }
-    /** True once the low-battery alert has fired, until the bottle is charged again. */
-    val lowBatteryNotified: Flow<Boolean> = store.data.map { it[KEY_LOW_BATTERY_NOTIFIED] ?: false }
+    /** When the low-battery alert last fired; 0 once the bottle has been charged again. */
+    val lowBatteryNotifiedMs: Flow<Long> = store.data.map { it[KEY_LOW_BATTERY_NOTIFIED] ?: 0L }
 
     suspend fun setPaceNudgeEnabled(value: Boolean) { store.edit { it[KEY_PACE_NUDGE] = value } }
     suspend fun setLastPaceNudge(ms: Long) { store.edit { it[KEY_LAST_PACE_NUDGE_MS] = ms } }
     suspend fun setLowBatteryAlertEnabled(value: Boolean) { store.edit { it[KEY_LOW_BATTERY_ALERT] = value } }
-    suspend fun setLowBatteryNotified(value: Boolean) { store.edit { it[KEY_LOW_BATTERY_NOTIFIED] = value } }
+    suspend fun setLowBatteryNotifiedMs(value: Long) { store.edit { it[KEY_LOW_BATTERY_NOTIFIED] = value } }
 
     val showStreak: Flow<Boolean> = store.data.map { it[KEY_SHOW_STREAK] ?: true }
     val lastUpdateCheckMs: Flow<Long> = store.data.map { it[KEY_LAST_UPDATE_CHECK_MS] ?: 0L }
@@ -79,8 +79,10 @@ class AppPreferencesRepository private constructor(context: Context) {
     suspend fun setFilterReminderEnabled(value: Boolean) {
         store.edit { it[KEY_FILTER_REMINDER] = value }
     }
-    suspend fun setFilterLastNotified(value: String) {
-        store.edit { it[KEY_FILTER_LAST_NOTIFIED] = value }
+    /** When that reminder was posted, so it can repeat until the filter is replaced. */
+    val filterLastNotifiedMs: Flow<Long> = store.data.map { it[KEY_FILTER_LAST_NOTIFIED_MS] ?: 0L }
+    suspend fun setFilterLastNotified(value: String, atMs: Long) {
+        store.edit { it[KEY_FILTER_LAST_NOTIFIED] = value; it[KEY_FILTER_LAST_NOTIFIED_MS] = atMs }
     }
 
     suspend fun setDailyGoal(mL: Int) {
@@ -134,7 +136,7 @@ class AppPreferencesRepository private constructor(context: Context) {
         private val KEY_PACE_NUDGE: Preferences.Key<Boolean> = booleanPreferencesKey("pace_nudge_enabled")
         private val KEY_LAST_PACE_NUDGE_MS: Preferences.Key<Long> = longPreferencesKey("last_pace_nudge_ms")
         private val KEY_LOW_BATTERY_ALERT: Preferences.Key<Boolean> = booleanPreferencesKey("low_battery_alert_enabled")
-        private val KEY_LOW_BATTERY_NOTIFIED: Preferences.Key<Boolean> = booleanPreferencesKey("low_battery_notified")
+        private val KEY_LOW_BATTERY_NOTIFIED: Preferences.Key<Long> = longPreferencesKey("low_battery_notified_ms")
         private val KEY_SHOW_STREAK: Preferences.Key<Boolean> = booleanPreferencesKey("show_streak")
         private val KEY_LAST_UPDATE_CHECK_MS: Preferences.Key<Long> = longPreferencesKey("last_update_check_ms")
         private val KEY_AUTO_UPDATE_ENABLED: Preferences.Key<Boolean> = booleanPreferencesKey("auto_update_enabled")
@@ -142,6 +144,7 @@ class AppPreferencesRepository private constructor(context: Context) {
         private val KEY_HC_LAST_SYNC_SEC: Preferences.Key<Long> = longPreferencesKey("hc_last_sync_sec")
 
         private val KEY_FILTER_REMINDER: Preferences.Key<Boolean> = booleanPreferencesKey("filter_reminder_enabled")
+        private val KEY_FILTER_LAST_NOTIFIED_MS: Preferences.Key<Long> = longPreferencesKey("filter_last_notified_ms")
         private val KEY_FILTER_LAST_NOTIFIED: Preferences.Key<String> = stringPreferencesKey("filter_last_notified")
 
         @Volatile

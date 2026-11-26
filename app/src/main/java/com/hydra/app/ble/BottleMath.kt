@@ -38,6 +38,12 @@ object BottleMath {
      */
     data class DaySchedule(val wakeSec: Int = 7 * 3600, val bedSec: Int = 23 * 3600) {
         /** Seconds awake, wake → bed, wrapping past midnight. A zero-length day counts as 24 h. */
+        /** Whether [secOfDay] (local seconds since midnight) falls in the sleep hours, bed → wake. */
+        fun isAsleep(secOfDay: Int): Boolean {
+            if (bedSec == wakeSec) return false
+            return Math.floorMod(secOfDay - bedSec, DAY_SEC) < Math.floorMod(wakeSec - bedSec, DAY_SEC)
+        }
+
         val awakeSec: Int get() = Math.floorMod(bedSec - wakeSec, DAY_SEC).let { if (it == 0) DAY_SEC else it }
 
         /**
