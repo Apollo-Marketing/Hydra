@@ -28,6 +28,8 @@ data class WidgetData(
     val filterPercent: Int?,
     val filterLow: Boolean,
     val lastSyncMs: Long,
+    /** The app's theme setting: null = follow the system, else forced dark / light. */
+    val forceDark: Boolean? = null,
 ) {
     val progress: Float get() = if (goalMl > 0) (intakeMl.toFloat() / goalMl).coerceIn(0f, 1f) else 0f
     val percent: Int get() = if (goalMl > 0) (intakeMl * 100f / goalMl).roundToInt() else 0
@@ -88,6 +90,11 @@ data class WidgetData(
                 filterPercent = filter?.percent,
                 filterLow = filter != null && filter.status != FilterStatus.Good,
                 lastSyncMs = prefs.lastSyncMs.first(),
+                forceDark = when (prefs.themeMode.first()) {
+                    AppPreferencesRepository.ThemeMode.Dark -> true
+                    AppPreferencesRepository.ThemeMode.Light -> false
+                    AppPreferencesRepository.ThemeMode.System -> null
+                },
             )
         }
     }

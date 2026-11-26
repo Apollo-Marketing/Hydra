@@ -55,16 +55,28 @@ import kotlinx.coroutines.flow.MutableStateFlow
 
 private const val TAG = "HydraWidget"
 
-// Day / night pairs; the launcher switches between them with the system theme.
-private val Card = ColorProvider(day = Color(0xFFFFFFFF), night = Color(0xFF0E1626))
-private val Ink = ColorProvider(day = Color(0xFF0F1A2B), night = Color(0xFFF2F6FC))
-private val Soft = ColorProvider(day = Color(0xFF4A5A73), night = Color(0xFFA9B8D0))
-private val PillBg = ColorProvider(day = Color(0xFFEEF2F8), night = Color(0xFF18233A))
-private val PillInk = ColorProvider(day = Color(0xFF26344A), night = Color(0xFFD5DEEC))
-private val WarnBg = ColorProvider(day = Color(0xFFFBEED6), night = Color(0xFF3A2C12))
-private val WarnInk = ColorProvider(day = Color(0xFF7A4600), night = Color(0xFFFFC46B))
-private val GoodBg = ColorProvider(day = Color(0xFFE1F4EB), night = Color(0xFF12332A))
-private val GoodInk = ColorProvider(day = Color(0xFF0B6B47), night = Color(0xFF6FE0B0))
+/**
+ * The app's own theme choice (Settings → Theme): null follows the system, otherwise it is
+ * forced dark or light. Set from the stored data just before the widget is drawn.
+ */
+@Volatile private var forceDark: Boolean? = null
+
+/** A day / night pair; with the theme forced, both sides get the same colour. */
+private fun pick(day: Long, night: Long): androidx.glance.unit.ColorProvider = when (forceDark) {
+    true -> ColorProvider(day = Color(night), night = Color(night))
+    false -> ColorProvider(day = Color(day), night = Color(day))
+    null -> ColorProvider(day = Color(day), night = Color(night))
+}
+
+private val Card get() = pick(0xFFFFFFFF, 0xFF0E1626)
+private val Ink get() = pick(0xFF0F1A2B, 0xFFF2F6FC)
+private val Soft get() = pick(0xFF4A5A73, 0xFFA9B8D0)
+private val PillBg get() = pick(0xFFEEF2F8, 0xFF18233A)
+private val PillInk get() = pick(0xFF26344A, 0xFFD5DEEC)
+private val WarnBg get() = pick(0xFFFBEED6, 0xFF3A2C12)
+private val WarnInk get() = pick(0xFF7A4600, 0xFFFFC46B)
+private val GoodBg get() = pick(0xFFE1F4EB, 0xFF12332A)
+private val GoodInk get() = pick(0xFF0B6B47, 0xFF6FE0B0)
 
 /**
  * Home-screen widget. Small (2×2): the ring with today's total and the pace line.
@@ -82,6 +94,7 @@ open class HydraWidget : GlanceAppWidget() {
             .onFailure { Log.w(TAG, "load failed: ${it.message}") }
         provideContent {
             val data by latest.collectAsState()
+            forceDark = data?.forceDark
             val size = LocalSize.current
             val wide = size.width >= WIDE_MIN_WIDTH && size.width.value >= size.height.value * 1.4f
             Box(

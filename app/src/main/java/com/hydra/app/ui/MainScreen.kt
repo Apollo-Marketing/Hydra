@@ -210,7 +210,7 @@ fun MainScreen() {
             prefs.dailyGoalMl,
             prefs.lastBatteryAtMs,
             prefs.lastSyncMs,
-            combine(prefs.wakeSec, prefs.bedSec, filterRepo.observeActive()) { _, _, _ -> },
+            combine(prefs.wakeSec, prefs.bedSec, filterRepo.observeActive(), prefs.themeMode) { _, _, _, _ -> },
         ) { _, _, _, _, _ -> }
             .collectLatest {
                 delay(500L)
