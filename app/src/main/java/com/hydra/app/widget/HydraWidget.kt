@@ -42,6 +42,7 @@ import androidx.glance.layout.fillMaxSize
 import androidx.glance.layout.fillMaxWidth
 import androidx.glance.layout.height
 import androidx.glance.layout.padding
+import androidx.glance.layout.size
 import androidx.glance.layout.width
 import androidx.glance.text.FontWeight
 import androidx.glance.text.Text
@@ -71,16 +72,18 @@ private val GoodInk = ColorProvider(day = Color(0xFF0B6B47), night = Color(0xFF6
  * and filter. It only shows what the app has already stored — it never talks to the bottle —
  * so it is as fresh as the last sync; [refresh] is called whenever that data changes.
  */
-class HydraWidget : GlanceAppWidget() {
+open class HydraWidget : GlanceAppWidget() {
 
-    override val sizeMode = SizeMode.Responsive(setOf(SMALL, WIDE))
+    // Exact: the layout is scaled to the real size, so it needs to know it.
+    override val sizeMode = SizeMode.Exact
 
     override suspend fun provideGlance(context: Context, id: GlanceId) {
         runCatching { latest.value = WidgetData.load(context) }
             .onFailure { Log.w(TAG, "load failed: ${it.message}") }
         provideContent {
             val data by latest.collectAsState()
-            val wide = LocalSize.current.width >= WIDE.width
+            val size = LocalSize.current
+            val wide = size.width >= WIDE_MIN_WIDTH && size.width.value >= size.height.value * 1.4f
             Box(
                 modifier = GlanceModifier
                     .fillMaxSize()
@@ -92,16 +95,15 @@ class HydraWidget : GlanceAppWidget() {
                 val d = data
                 when {
                     d == null -> Text("Open Hydra", style = TextStyle(color = Soft, fontSize = 13.sp))
-                    wide -> Wide(d)
-                    else -> Small(d)
+                    wide -> Wide(d, scaleFor(size, 720f))
+                    else -> Small(d, scaleFor(size, 340f))
                 }
             }
         }
     }
 
     companion object {
-        private val SMALL = DpSize(110.dp, 110.dp)
-        private val WIDE = DpSize(250.dp, 110.dp)
+        private val WIDE_MIN_WIDTH = 250.dp
 
         /** Latest data, held here so a widget that is already on screen redraws from it. */
         private val latest = MutableStateFlow<WidgetData?>(null)
@@ -111,6 +113,7 @@ class HydraWidget : GlanceAppWidget() {
             runCatching {
                 latest.value = WidgetData.load(context)
                 HydraWidget().updateAll(context.applicationContext)
+                HydraWideWidget().updateAll(context.applicationContext)
             }.onFailure { Log.w(TAG, "refresh failed: ${it.message}") }
         }
     }
@@ -120,30 +123,48 @@ class HydraWidgetReceiver : GlanceAppWidgetReceiver() {
     override val glanceAppWidget: GlanceAppWidget = HydraWidget()
 }
 
+/** Identical widget listed separately in the picker so it starts out 4 cells wide. */
+class HydraWideWidget : HydraWidget()
+
+class HydraWideWidgetReceiver : GlanceAppWidgetReceiver() {
+    override val glanceAppWidget: GlanceAppWidget = HydraWideWidget()
+}
+
+// Both layouts are drawn in the mockup's own units (a 340-unit-tall card, 340 wide when small
+// and 720 wide when wide) and scaled to whatever size the launcher gives the widget, so the
+// proportions hold on any grid. Small text has a floor so it stays readable.
+private fun scaleFor(size: DpSize, mockWidth: Float): Float =
+    minOf(size.width.value / mockWidth, size.height.value / 340f)
+
 @Composable
-private fun Small(d: WidgetData) {
+private fun Small(d: WidgetData, k: Float) {
     Column(
-        modifier = GlanceModifier.fillMaxSize().padding(10.dp),
+        modifier = GlanceModifier.fillMaxSize().padding((20 * k).dp),
         horizontalAlignment = Alignment.CenterHorizontally,
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(modifier = GlanceModifier.fillMaxWidth().defaultWeight(), contentAlignment = Alignment.Center) {
+        Box(modifier = GlanceModifier.size((246 * k).dp), contentAlignment = Alignment.Center) {
             Ring(d)
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(
                     "%,d".format(d.intakeMl),
-                    style = TextStyle(color = Ink, fontSize = 22.sp, fontWeight = FontWeight.Bold),
+                    style = TextStyle(color = Ink, fontSize = (46 * k).sp, fontWeight = FontWeight.Bold),
                     maxLines = 1,
                 )
-                Text("of ${"%,d".format(d.goalMl)} ml", style = TextStyle(color = Soft, fontSize = 10.sp), maxLines = 1)
+                Text(
+                    "of ${"%,d".format(d.goalMl)} ml",
+                    style = TextStyle(color = Soft, fontSize = maxOf(10f, 17 * k).sp),
+                    maxLines = 1,
+                )
             }
         }
         d.pace?.let {
-            Spacer(GlanceModifier.height(4.dp))
+            Spacer(GlanceModifier.height((10 * k).dp))
             Text(
                 if (it.behind) "${it.text} pace" else it.text,
                 style = TextStyle(
                     color = if (it.behind) WarnInk else GoodInk,
-                    fontSize = 12.sp,
+                    fontSize = maxOf(12f, 19 * k).sp,
                     fontWeight = FontWeight.Medium,
                 ),
                 maxLines = 1,
@@ -153,46 +174,48 @@ private fun Small(d: WidgetData) {
 }
 
 @Composable
-private fun Wide(d: WidgetData) {
+private fun Wide(d: WidgetData, k: Float) {
+    val pillFont = maxOf(12f, 19 * k)
     Row(
-        modifier = GlanceModifier.fillMaxSize().padding(horizontal = 14.dp, vertical = 12.dp),
+        modifier = GlanceModifier.fillMaxSize().padding(horizontal = (42 * k).dp),
         verticalAlignment = Alignment.CenterVertically,
+        horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Box(modifier = GlanceModifier.width(112.dp).fillMaxHeight(), contentAlignment = Alignment.Center) {
+        Box(modifier = GlanceModifier.size((250 * k).dp), contentAlignment = Alignment.Center) {
             Ring(d)
             Text(
                 "${d.percent}%",
-                style = TextStyle(color = Ink, fontSize = 20.sp, fontWeight = FontWeight.Bold),
+                style = TextStyle(color = Ink, fontSize = (50 * k).sp, fontWeight = FontWeight.Bold),
                 maxLines = 1,
             )
         }
-        Spacer(GlanceModifier.width(14.dp))
+        Spacer(GlanceModifier.width((44 * k).dp))
         Column(modifier = GlanceModifier.defaultWeight()) {
             Row(verticalAlignment = Alignment.Bottom) {
                 Text(
                     "%,d".format(d.intakeMl),
-                    style = TextStyle(color = Ink, fontSize = 30.sp, fontWeight = FontWeight.Bold),
+                    style = TextStyle(color = Ink, fontSize = (78 * k).sp, fontWeight = FontWeight.Bold),
                     maxLines = 1,
                 )
-                Text(" ml", style = TextStyle(color = Soft, fontSize = 14.sp), maxLines = 1)
+                Text(" ml", style = TextStyle(color = Soft, fontSize = (28 * k).sp), maxLines = 1)
             }
-            Spacer(GlanceModifier.height(5.dp))
+            Spacer(GlanceModifier.height((14 * k).dp))
             Row(modifier = GlanceModifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                d.pace?.let { Pill(it.text, warn = it.behind, good = !it.behind) }
+                d.pace?.let { Pill(it.text, pillFont, k, warn = it.behind, good = !it.behind) }
                 Spacer(GlanceModifier.defaultWeight())
                 WidgetData.ageText(d.lastSyncMs)?.let {
-                    Text(it, style = TextStyle(color = Soft, fontSize = 11.sp), maxLines = 1)
+                    Text(it, style = TextStyle(color = Soft, fontSize = maxOf(11f, 16 * k).sp), maxLines = 1)
                 }
             }
             if (d.batteryPercent != null || d.filterPercent != null) {
-                Spacer(GlanceModifier.height(5.dp))
+                Spacer(GlanceModifier.height((14 * k).dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     d.batteryPercent?.let {
-                        Pill("$it%", warn = d.batteryLow, icon = R.drawable.ic_widget_battery, iconLabel = "Bottle battery")
-                        Spacer(GlanceModifier.width(6.dp))
+                        Pill("$it%", pillFont, k, warn = d.batteryLow, icon = R.drawable.ic_widget_battery, iconLabel = "Bottle battery")
+                        Spacer(GlanceModifier.width((12 * k).dp))
                     }
                     d.filterPercent?.let {
-                        Pill("$it%", warn = d.filterLow, icon = R.drawable.ic_widget_filter, iconLabel = "Filter")
+                        Pill("$it%", pillFont, k, warn = d.filterLow, icon = R.drawable.ic_widget_filter, iconLabel = "Filter")
                     }
                 }
             }
@@ -201,22 +224,37 @@ private fun Wide(d: WidgetData) {
 }
 
 @Composable
-private fun Pill(text: String, warn: Boolean, good: Boolean = false, icon: Int? = null, iconLabel: String? = null) {
+private fun Pill(
+    text: String,
+    font: Float,
+    k: Float,
+    warn: Boolean,
+    good: Boolean = false,
+    icon: Int? = null,
+    iconLabel: String? = null,
+) {
     val bg = when { warn -> WarnBg; good -> GoodBg; else -> PillBg }
     val ink = when { warn -> WarnInk; good -> GoodInk; else -> PillInk }
     Row(
-        modifier = GlanceModifier.background(bg).cornerRadius(14.dp).padding(horizontal = 9.dp, vertical = 4.dp),
+        modifier = GlanceModifier
+            .background(bg)
+            .cornerRadius((font * 1.3f).dp)
+            .padding(horizontal = (font * 0.9f).dp, vertical = (font * 0.5f).dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (icon != null) {
+            // The battery glyph is wider than tall; the filter glyph is square.
+            val h = font * 0.95f
+            val w = if (icon == R.drawable.ic_widget_battery) h * 1.8f else h * 1.15f
             Image(
                 provider = ImageProvider(icon),
                 contentDescription = iconLabel,
+                modifier = GlanceModifier.width(w.dp).height(h.dp),
                 colorFilter = ColorFilter.tint(ink),
             )
-            Spacer(GlanceModifier.width(5.dp))
+            Spacer(GlanceModifier.width((font * 0.45f).dp))
         }
-        Text(text, style = TextStyle(color = ink, fontSize = 12.sp, fontWeight = FontWeight.Medium), maxLines = 1)
+        Text(text, style = TextStyle(color = ink, fontSize = font.sp, fontWeight = FontWeight.Medium), maxLines = 1)
     }
 }
 

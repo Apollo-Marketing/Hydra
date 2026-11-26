@@ -1,4 +1,7 @@
 <resources>
     <string name="app_name">Hydra</string>
-    <string name="widget_description">Today\'s water, pace, bottle battery and filter</string>
+    <string name="widget_description">Today\'s water and pace</string>
+    <string name="widget_wide_description">Today\'s water, pace, bottle battery and filter</string>
+    <string name="widget_small_label">Today (small)</string>
+    <string name="widget_wide_label">Today and bottle status (wide)</string>
 </resources>
