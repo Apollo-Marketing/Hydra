@@ -176,6 +176,15 @@ private fun Small(d: WidgetData, k: Float) {
 @Composable
 private fun Wide(d: WidgetData, k: Float) {
     val pillFont = maxOf(12f, 19 * k)
+    // How fresh the data is, tucked into the bottom corner of the card, out of the way.
+    WidgetData.ageText(d.lastSyncMs)?.let {
+        Box(
+            modifier = GlanceModifier.fillMaxSize().padding(end = (42 * k).dp, bottom = (22 * k).dp),
+            contentAlignment = Alignment.BottomEnd,
+        ) {
+            Text(it, style = TextStyle(color = Soft, fontSize = maxOf(11f, 16 * k).sp), maxLines = 1)
+        }
+    }
     Row(
         modifier = GlanceModifier.fillMaxSize().padding(horizontal = (42 * k).dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -200,13 +209,7 @@ private fun Wide(d: WidgetData, k: Float) {
                 Text(" ml", style = TextStyle(color = Soft, fontSize = (28 * k).sp), maxLines = 1)
             }
             Spacer(GlanceModifier.height((14 * k).dp))
-            Row(modifier = GlanceModifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                d.pace?.let { Pill(it.text, pillFont, k, warn = it.behind, good = !it.behind) }
-                Spacer(GlanceModifier.defaultWeight())
-                WidgetData.ageText(d.lastSyncMs)?.let {
-                    Text(it, style = TextStyle(color = Soft, fontSize = maxOf(11f, 16 * k).sp), maxLines = 1)
-                }
-            }
+            d.pace?.let { Pill(it.text, pillFont, k, warn = it.behind, good = !it.behind) }
             if (d.batteryPercent != null || d.filterPercent != null) {
                 Spacer(GlanceModifier.height((14 * k).dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -244,8 +247,9 @@ private fun Pill(
     ) {
         if (icon != null) {
             // The battery glyph is wider than tall; the filter glyph is square.
-            val h = font * 0.95f
-            val w = if (icon == R.drawable.ic_widget_battery) h * 1.8f else h * 1.15f
+            val battery = icon == R.drawable.ic_widget_battery
+            val h = if (battery) font * 0.95f else font * 1.25f
+            val w = if (battery) h * 1.8f else h
             Image(
                 provider = ImageProvider(icon),
                 contentDescription = iconLabel,
