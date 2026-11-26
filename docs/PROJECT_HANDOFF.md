@@ -563,5 +563,5 @@ Log requests (`ActivationLog`, `FaultLog`, `StateLog`, ADC logs) take the same `
 - **Hydra and Hydra Dev both run background sync** and contend for the bottle; turn it off in whichever is not in use.
 - `git push` from this machine fails with the keychain's `jp-29235` login; pushes were made with `git -c credential.helper= -c 'credential.helper=!gh auth git-credential' push …` (the `gh` CLI is signed in as `Apollo-Marketing`).
 - The release workflow warns that `actions/setup-java@v4` is deprecated.
-- Not built: Health Connect sleep import for wake/bed times, home screen widget, "behind pace" notifications, fault display, UV history list, export/backup, reading the bottle size from the bottle, hydration-reminder editing.
+- Not built: home screen widget, "behind pace" notifications, fault display, UV history list, export/backup, reading the bottle size from the bottle, hydration-reminder editing. Health Connect sleep import for wake/bed times was considered and dropped (owner: too complicated for now).
 - Debug aid: `adb shell am start --activity-clear-task -n com.hydra.app.dev/com.hydra.app.MainActivity --ez bgsync_test true` queues one background check-in 45 s later (`adb logcat -s HydraBgSync`).

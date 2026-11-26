@@ -90,16 +90,6 @@ app/src/main/java/com/hydra/app/
 
 - `docs/PROJECT_HANDOFF.md` — full session history, protocol details, decompilation findings, captures location. Read first when picking up cold.
 - `docs/POTENTIAL_FEATURES.md` — tiered roadmap of features we could build, with effort estimates.
-- `~/.claude/plans/cozy-popping-muffin.md` — most recently approved plan.
-
-## Available Skills
-
-- `/spec` — explore, plan, execute (default entry point for new work)
-- `/commit` — verified conventional commits (build green required)
-- `/qa` — code quality review against `.claude/skills/qa/references/standards.md`
-- `/wrapup` — end-to-end ship pipeline
-- `/sync-docs` — audit docs against the codebase
-- `/introspect` — adjust how Claude works on this project
 
 ## Rules
 
@@ -128,4 +118,4 @@ and explain the risk before doing anything.**
 
 **`Bash(rm:*)` deny rule.** The user previously had a global `Bash(rm:*)` deny rule and removed it. Don't take that as license to delete files casually — confirm before any `rm` outside of obvious build/cache/scratch paths.
 
-**Note for the `add-feature` skill and any future protocol scaffolding work:** the type-URL constants for these forbidden commands are intentionally absent from `BottleProtocol.Requests`. Don't add them. If audit tooling asks "why aren't these in the vocabulary," point at this rules block.
+**Note for any future protocol scaffolding work:** the type-URL constants for these forbidden commands are intentionally absent from `BottleProtocol.Requests`. Don't add them. If audit tooling asks "why aren't these in the vocabulary," point at this rules block.
